@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "Paragraph Extractor",
+  "description": "Extract all <p> tags from a page and open in a new tab",
+  "version": "1.0",
+  "action": {
+    "default_title": "Extract Paragraphs",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "permissions": ["activeTab", "scripting"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "web_accessible_resources": [{
+    "resources": ["content.js"],
+    "matches": ["<all_urls>"]
+  }]
+}
