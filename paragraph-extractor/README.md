@@ -47,7 +47,7 @@ Chrome extensions don't work on mobile, but you can use a bookmarklet instead.
 4. Replace the URL with this code:
 
 ```
-javascript:(function(){var t=document.querySelector('h1')?document.querySelector('h1').innerText:document.title;var p=document.querySelectorAll('p');var h=Array.from(p).map(function(p){return'<p>'+p.innerHTML+'</p>'}).join('');document.head.innerHTML='<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{max-width:800px;margin:40px auto;padding:0 20px;font-family:Georgia,serif;line-height:1.6;color:#333}h1{margin-bottom:1em;border-bottom:1px solid #ccc;padding-bottom:0.5em}p{margin-bottom:1em}a{color:#0066cc}.back{position:fixed;top:10px;right:10px;padding:8px 16px;background:#0066cc;color:#fff;border:none;border-radius:4px}</style>';document.body.innerHTML='<button class="back" onclick="history.back()">← Back</button><h1>'+t+'</h1>'+h})();
+javascript:(function(){var t=document.querySelector('h1')?document.querySelector('h1').innerText:document.title;var p=document.querySelectorAll('p');var h=Array.from(p).map(function(p){return'<p>'+p.innerHTML+'</p>'}).join('');document.documentElement.style.cssText='overflow:auto !important;height:auto !important;position:static !important';document.body.style.cssText='overflow:auto !important;height:auto !important;position:static !important';document.head.innerHTML='<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{max-width:800px;margin:40px auto;padding:0 20px;font-family:Georgia,serif;line-height:1.6;color:#333}h1{margin-bottom:1em;border-bottom:1px solid #ccc;padding-bottom:0.5em}p{margin-bottom:1em}a{color:#0066cc}.back{position:fixed;top:10px;right:10px;padding:8px 16px;background:#0066cc;color:#fff;border:none;border-radius:4px}</style>';document.body.innerHTML='<button class="back" onclick="history.back()">← Back</button><h1>'+t+'</h1>'+h})();
 ```
 
 ### Usage
@@ -62,3 +62,7 @@ javascript:(function(){var t=document.querySelector('h1')?document.querySelector
 - **Android Chrome**: Tapping bookmarks from the menu won't work. Instead, type the bookmark name in the address bar and select it from suggestions.
 - **iOS Safari**: Add bookmark via Share menu, then edit to replace URL
 - **Firefox Mobile**: Supports bookmarklets directly
+
+### Limitations
+
+- **Some sites block bookmarklets**: Sites with strict Content Security Policy (CSP) headers will silently block the bookmarklet from running. This is a security feature with no workaround. If the bookmarklet does nothing on a particular site, CSP is likely the cause.
