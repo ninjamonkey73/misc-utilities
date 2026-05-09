@@ -1,0 +1,136 @@
+#speed-reader-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 9999999;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+}
+
+.speed-reader-modal {
+  background: #ffffff;
+  padding: 40px 30px 30px;
+  border-radius: 12px;
+  width: 500px;
+  max-width: 90%;
+  box-shadow: 0 15px 35px rgba(0,0,0,0.4);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.speed-reader-close {
+  position: absolute;
+  top: 10px;
+  right: 15px;
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  color: #888;
+  transition: color 0.2s;
+}
+
+.speed-reader-close:hover {
+  color: #333;
+}
+
+.speed-reader-word-display {
+  width: 100%;
+  margin: 20px 0 40px;
+  min-height: 80px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  border-top: 1px solid #eee;
+  border-bottom: 1px solid #eee;
+  padding: 10px 0;
+}
+
+/* Guidelines for ORP */
+.speed-reader-word-display::before,
+.speed-reader-word-display::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  width: 2px;
+  height: 10px;
+  background: #ccc;
+  transform: translateX(-50%);
+}
+
+.speed-reader-word-display::before {
+  top: 0;
+}
+
+.speed-reader-word-display::after {
+  bottom: 0;
+}
+
+
+.speed-reader-word-container {
+  display: flex;
+  font-family: monospace;
+  font-size: 40px;
+  width: 100%;
+  justify-content: center;
+}
+
+.speed-reader-left {
+  flex: 1;
+  text-align: right;
+  color: #333;
+}
+
+.speed-reader-center {
+  color: #e50000;
+}
+
+.speed-reader-right {
+  flex: 1;
+  text-align: left;
+  color: #333;
+}
+
+.speed-reader-controls {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  width: 100%;
+}
+
+.speed-reader-controls button {
+  padding: 10px 20px;
+  background: #007bff;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: bold;
+  transition: background 0.2s;
+}
+
+.speed-reader-controls button:hover {
+  background: #0056b3;
+}
+
+.speed-reader-controls input[type=range] {
+  flex-grow: 1;
+  cursor: pointer;
+}
+
+.speed-reader-wpm {
+  font-size: 16px;
+  color: #555;
+  font-weight: bold;
+  min-width: 80px;
+  text-align: right;
+}
