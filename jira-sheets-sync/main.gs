@@ -98,7 +98,8 @@ function runSyncInternal(triggeredBySchedule) {
     }
 
     const scopeIssues  = fetchScopeIssues(config);
-    const keyToStatus  = classifyIssues(config.statusMappings, config);
+    const scopeKeys    = scopeIssues.map(function(i) { return i.key; });
+    const keyToStatus  = classifyIssues(config.statusMappings, config, scopeKeys);
     const keyToRow     = buildKeyMap(sheet);
     const state        = loadState();
 

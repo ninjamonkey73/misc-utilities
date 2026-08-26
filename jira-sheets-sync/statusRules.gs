@@ -1,23 +1,37 @@
 // Runs each status mapping's JQL against JIRA and builds a key -> label map.
-// Evaluation is ordered -- first match wins, so BLOCKED/HOLD at positions 0/1
-// take priority over all workflow statuses.
-function classifyIssues(statusMappings, config) {
-  const keyToStatus = {};
+// scopeKeys limits every query to only the issues already known to be in scope,
+// which prevents JIRA from traversing the full project hierarchy on each call.
+// Evaluation stops early once every scope issue has been classified.
+function classifyIssues(statusMappings, config, scopeKeys) {
+  const keyToStatus  = {};
+  const unclassified = {};
+  scopeKeys.forEach(function(k) { unclassified[k] = true; });
 
-  statusMappings.forEach(function(mapping) {
-    if (!mapping.jql || !mapping.jql.trim()) return; // skip blank rows
+  // Wrap the caller's JQL to restrict results to scope keys only.
+  // This turns expensive project-wide parentsOf() scans into targeted lookups.
+  const scopeFilter = 'key in (' + scopeKeys.join(',') + ')';
+
+  for (var i = 0; i < statusMappings.length; i++) {
+    var mapping = statusMappings[i];
+    if (!mapping.jql || !mapping.jql.trim()) continue; // skip blank rows
+
+    // Stop once every scope issue has a status
+    if (Object.keys(unclassified).length === 0) break;
+
+    var scopedJql = '(' + mapping.jql + ') AND ' + scopeFilter;
 
     try {
-      const keys = fetchKeysByJql(mapping.jql, config);
+      var keys = fetchKeysByJql(scopedJql, config);
       keys.forEach(function(key) {
         if (!keyToStatus[key]) {
           keyToStatus[key] = mapping.label;
+          delete unclassified[key];
         }
       });
     } catch (e) {
       throw new Error('JQL error in status mapping "' + mapping.label + '": ' + e.message);
     }
-  });
+  }
 
   return keyToStatus;
 }

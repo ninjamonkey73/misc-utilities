@@ -92,10 +92,12 @@ function parseIssue_(issue, config) {
   };
 }
 
-// Lightweight key-only fetch for a single swimlane JQL
-function fetchKeysByJql(jql, config) {
+// Lightweight key-only fetch for a single swimlane JQL.
+// maxResults defaults to 500 but callers can pass a smaller cap (e.g. scope size).
+function fetchKeysByJql(jql, config, maxResults) {
   if (!jql || !jql.trim()) return [];
 
+  maxResults = maxResults || 500;
   const keys = [];
   let startAt = 0;
 
@@ -103,12 +105,12 @@ function fetchKeysByJql(jql, config) {
     const data = jiraRequest_(config, '/rest/api/2/search', {
       jql:        jql,
       fields:     'key',
-      maxResults: 500,
+      maxResults: maxResults,
       startAt:    startAt
     });
 
     (data.issues || []).forEach(function(issue) { keys.push(issue.key); });
-    startAt += 500;
+    startAt += maxResults;
     if (startAt >= (data.total || 0)) break;
   } while (true);
 
