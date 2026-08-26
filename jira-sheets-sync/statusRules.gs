@@ -1,5 +1,5 @@
-// Runs each status mapping's JQL against JIRA and builds a key → label map.
-// Evaluation is ordered — first match wins, so BLOCKED/HOLD at positions 0/1
+// Runs each status mapping's JQL against JIRA and builds a key -> label map.
+// Evaluation is ordered -- first match wins, so BLOCKED/HOLD at positions 0/1
 // take priority over all workflow statuses.
 function classifyIssues(statusMappings, config) {
   const keyToStatus = {};
@@ -7,12 +7,16 @@ function classifyIssues(statusMappings, config) {
   statusMappings.forEach(function(mapping) {
     if (!mapping.jql || !mapping.jql.trim()) return; // skip blank rows
 
-    const keys = fetchKeysByJql(mapping.jql, config);
-    keys.forEach(function(key) {
-      if (!keyToStatus[key]) {
-        keyToStatus[key] = mapping.label;
-      }
-    });
+    try {
+      const keys = fetchKeysByJql(mapping.jql, config);
+      keys.forEach(function(key) {
+        if (!keyToStatus[key]) {
+          keyToStatus[key] = mapping.label;
+        }
+      });
+    } catch (e) {
+      throw new Error('JQL error in status mapping "' + mapping.label + '": ' + e.message);
+    }
   });
 
   return keyToStatus;
