@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en-US">
+  <head>
+    <base target="_top" />
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        font-family: Arial, sans-serif;
+        font-size: 13px;
+        padding: 10px 16px 14px;
+        margin: 0;
+        color: #333;
+      }
+      h3 {
+        margin: 14px 0 6px;
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: #555;
+      }
+      label {
+        display: block;
+        margin-bottom: 3px;
+        font-weight: bold;
+        font-size: 12px;
+      }
+      input[type="text"],
+      input[type="password"] {
+        width: 100%;
+        padding: 5px 8px;
+        border: 1px solid #ccc;
+        border-radius: 3px;
+        font-size: 12px;
+      }
+      .row {
+        margin-bottom: 9px;
+      }
+      hr {
+        border: none;
+        border-top: 1px solid #e0e0e0;
+        margin: 12px 0;
+      }
+
+      /* Status mappings table */
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+      }
+      th {
+        background: #f5f5f5;
+        padding: 5px 7px;
+        text-align: left;
+        font-size: 11px;
+        font-weight: bold;
+        border-bottom: 2px solid #ddd;
+      }
+      td {
+        padding: 4px 5px;
+        border-bottom: 1px solid #eee;
+        vertical-align: top;
+      }
+      .lbl {
+        font-weight: bold;
+        white-space: nowrap;
+        padding-right: 6px;
+      }
+      .lbl-alert {
+        color: #c0392b;
+      }
+      .jql-inp {
+        width: 100%;
+        padding: 3px 6px;
+        border: 1px solid #ccc;
+        border-radius: 2px;
+        font-family: monospace;
+        font-size: 11px;
+      }
+      .jql-inp:focus {
+        border-color: #1a73e8;
+        outline: none;
+      }
+      .test-btn {
+        padding: 2px 9px;
+        font-size: 11px;
+        cursor: pointer;
+        border: 1px solid #ccc;
+        border-radius: 3px;
+        background: #fff;
+        white-space: nowrap;
+      }
+      .test-btn:hover {
+        background: #f0f0f0;
+      }
+      .result {
+        font-size: 11px;
+        margin-top: 2px;
+        min-height: 14px;
+      }
+      .ok {
+        color: #2a7d2a;
+      }
+      .err {
+        color: #c0392b;
+      }
+
+      /* Footer */
+      .footer {
+        display: flex;
+        gap: 8px;
+        margin-top: 14px;
+        position: sticky;
+        bottom: 0;
+        background: white;
+        padding-top: 10px;
+        border-top: 1px solid #e0e0e0;
+      }
+      .btn-primary {
+        padding: 7px 22px;
+        background: #1a73e8;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 13px;
+      }
+      .btn-primary:hover {
+        background: #1558b0;
+      }
+      .btn-primary:disabled {
+        background: #9ab8e8;
+        cursor: default;
+      }
+      .btn-cancel {
+        padding: 7px 14px;
+        background: #e8e8e8;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 13px;
+      }
+      .note {
+        font-size: 11px;
+        color: #888;
+        margin-bottom: 6px;
+      }
+      #status-msg {
+        font-size: 12px;
+        color: #555;
+        margin-left: auto;
+        align-self: center;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="loading">Loading settings…</div>
+
+    <div id="form" style="display: none">
+      <h3>JIRA Connection</h3>
+      <div class="row">
+        <label>JIRA Base URL</label>
+        <input
+          type="text"
+          id="jiraBaseUrl"
+          placeholder="https://jira.example.com"
+        />
+      </div>
+      <div class="row">
+        <label>Auth Type</label>
+        <select id="authType" onchange="updateAuthFields()" style="width:100%;padding:5px 8px;border:1px solid #ccc;border-radius:3px;font-size:12px;">
+          <option value="basic">Basic Auth (username + password)</option>
+          <option value="pat">Personal Access Token (PAT)</option>
+        </select>
+        <div style="font-size:11px;color:#888;margin-top:3px;" id="authHint">
+          Use Basic Auth for username + password. Use PAT if your JIRA admin issued you a personal access token.
+        </div>
+      </div>
+      <div class="row" id="usernameRow">
+        <label>Username</label>
+        <input type="text" id="jiraUsername" placeholder="your.username" />
+      </div>
+      <div class="row">
+        <label id="tokenLabel">Password / API Token</label>
+        <input type="password" id="jiraToken" placeholder="••••••••" />
+      </div>
+
+      <hr />
+      <h3>Sheet Settings</h3>
+      <div class="row">
+        <label>Main JQL — defines which stories to track</label>
+        <input
+          type="text"
+          id="jqlQuery"
+          placeholder="project = XLIS AND issuetype = Story"
+        />
+      </div>
+      <div class="row">
+        <label>Tab Name</label>
+        <input type="text" id="tabName" placeholder="Team Tracker" />
+      </div>
+      <div class="row">
+        <label>Daily Notification Emails (comma-separated)</label>
+        <input
+          type="text"
+          id="notifyEmails"
+          placeholder="pm@example.com, lead@example.com"
+        />
+      </div>
+
+      <hr />
+      <h3>Status Mappings</h3>
+      <p class="note">
+        Enter the JIRA JQL for each status. Evaluation is ordered — first match
+        wins. BLOCKED and HOLD must stay at the top to take priority over all
+        workflow statuses.
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 130px">Status</th>
+            <th>JQL</th>
+            <th style="width: 62px">Test</th>
+          </tr>
+        </thead>
+        <tbody id="mappings"></tbody>
+      </table>
+
+      <div class="footer">
+        <button class="btn-primary" id="saveBtn" onclick="save()">
+          Save &amp; Close
+        </button>
+        <button class="btn-cancel" onclick="google.script.host.close()">
+          Cancel
+        </button>
+        <span id="status-msg"></span>
+      </div>
+    </div>
+    <!-- /form -->
+
+    <script>
+      var mappings = [];
+
+      function updateAuthFields() {
+        var isPat = document.getElementById("authType").value === "pat";
+        document.getElementById("usernameRow").style.display = isPat ? "none" : "";
+        document.getElementById("tokenLabel").textContent    = isPat ? "Personal Access Token" : "Password / API Token";
+        document.getElementById("authHint").textContent      = isPat
+          ? "PAT: generate from your JIRA profile → Personal Access Tokens. No username needed."
+          : "Basic Auth: enter your JIRA username and password (or API token if enabled).";
+      }
+
+      function esc(s) {
+        return String(s || "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }
+
+      function renderMappings() {
+        var tbody = document.getElementById("mappings");
+        tbody.innerHTML = "";
+        mappings.forEach(function (m, i) {
+          var isGuard = i === 0 || i === 1; // BLOCKED / HOLD
+          var tr = document.createElement("tr");
+          tr.innerHTML =
+            '<td class="lbl' +
+            (isGuard ? " lbl-alert" : "") +
+            '">' +
+            esc(m.label) +
+            "</td>" +
+            "<td>" +
+            '<input class="jql-inp" id="jql' +
+            i +
+            '" value="' +
+            esc(m.jql) +
+            '" placeholder="JQL…">' +
+            '<div class="result" id="res' +
+            i +
+            '"></div>' +
+            "</td>" +
+            '<td><button class="test-btn" onclick="testRow(' +
+            i +
+            ')">▶ Test</button></td>';
+          tbody.appendChild(tr);
+        });
+      }
+
+      function testRow(i) {
+        var jql = document.getElementById("jql" + i).value.trim();
+        var res = document.getElementById("res" + i);
+        res.textContent = "Testing…";
+        res.className = "result";
+
+        google.script.run
+          .withSuccessHandler(function (r) {
+            if (r.error) {
+              res.textContent = "✗ " + r.error;
+              res.className = "result err";
+            } else {
+              res.textContent =
+                "✓ " +
+                r.count +
+                " issue" +
+                (r.count !== 1 ? "s" : "") +
+                " match";
+              res.className = "result ok";
+            }
+          })
+          .withFailureHandler(function (e) {
+            res.textContent = "✗ " + e.message;
+            res.className = "result err";
+          })
+          .testJqlFromDialog(jql);
+      }
+
+      function save() {
+        // Collect latest JQL values from inputs
+        mappings.forEach(function (m, i) {
+          m.jql = document.getElementById("jql" + i).value;
+        });
+
+        var data = {
+          jiraBaseUrl:    document.getElementById("jiraBaseUrl").value.trim(),
+          authType:       document.getElementById("authType").value,
+          jiraUsername:   document.getElementById("jiraUsername").value.trim(),
+          jiraToken:      document.getElementById("jiraToken").value,
+          jqlQuery:       document.getElementById("jqlQuery").value.trim(),
+          tabName:        document.getElementById("tabName").value.trim(),
+          notifyEmails:   document.getElementById("notifyEmails").value.trim(),
+          statusMappings: mappings,
+        };
+
+        var btn = document.getElementById("saveBtn");
+        var msg = document.getElementById("status-msg");
+        btn.disabled = true;
+        msg.textContent = "Saving…";
+
+        google.script.run
+          .withSuccessHandler(function () {
+            google.script.host.close();
+          })
+          .withFailureHandler(function (e) {
+            btn.disabled = false;
+            msg.textContent = "Save failed: " + e.message;
+          })
+          .saveSettingsFromDialog(data);
+      }
+
+      // Load on open
+      google.script.run
+        .withSuccessHandler(function (s) {
+          document.getElementById("jiraBaseUrl").value  = s.jiraBaseUrl  || "";
+          document.getElementById("authType").value      = s.authType     || "basic";
+          document.getElementById("jiraUsername").value  = s.jiraUsername || "";
+          document.getElementById("jiraToken").value     = s.jiraToken    || "";
+          document.getElementById("jqlQuery").value      = s.jqlQuery     || "";
+          document.getElementById("tabName").value       = s.tabName      || "";
+          document.getElementById("notifyEmails").value  = s.notifyEmails || "";
+          mappings = s.statusMappings || [];
+          updateAuthFields(); // apply visibility based on loaded auth type
+          renderMappings();
+          document.getElementById("loading").style.display = "none";
+          document.getElementById("form").style.display    = "block";
+        })
+        .withFailureHandler(function (e) {
+          document.getElementById("loading").textContent =
+            "Error loading settings: " + e.message;
+        })
+        .getSettingsForDialog();
+    </script>
+  </body>
+</html>
