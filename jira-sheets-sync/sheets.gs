@@ -31,6 +31,19 @@ function resolveColumns(sheet, config) {
   };
 }
 
+// Converts a cell value to an ISO date string (yyyy-MM-dd).
+// Google Sheets returns date cells as JavaScript Date objects via getValues(),
+// not strings — so String(dateCell) produces a locale datetime, not an ISO date.
+function cellToIsoDate_(value) {
+  if (!value && value !== 0) return '';
+  if (value instanceof Date) {
+    return Utilities.formatDate(value, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+  const s = String(value).trim();
+  // Accept already-ISO strings (yyyy-MM-dd) and bare text passthrough
+  return s;
+}
+
 // Reads all script-managed columns for every row in one range call.
 // Returns a map of jiraKey -> { row, currentStatus, currentStart, currentEnd, currentResolved }.
 function buildKeyMap(sheet, cols) {
@@ -51,9 +64,9 @@ function buildKeyMap(sheet, cols) {
     map[key] = {
       row:             i + 2,
       currentStatus:   String(row[cols.colStatus   - minCol] || '').trim(),
-      currentStart:    String(row[cols.colStart     - minCol] || '').trim(),
-      currentEnd:      String(row[cols.colEnd       - minCol] || '').trim(),
-      currentResolved: String(row[cols.colResolved  - minCol] || '').trim()
+      currentStart:    cellToIsoDate_(row[cols.colStart     - minCol]),
+      currentEnd:      cellToIsoDate_(row[cols.colEnd       - minCol]),
+      currentResolved: cellToIsoDate_(row[cols.colResolved  - minCol])
     };
   });
 

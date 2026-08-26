@@ -14,13 +14,16 @@ function getParentsOfMatch_(jql) {
   return null;
 }
 
-// Classifies a single JIRA issue by evaluating each status mapping in priority order.
-// Stops at the first match and returns the label, or null if nothing matched.
+// Classifies a single JIRA issue by evaluating status mappings from MOST ADVANCED
+// (last in the list) to LEAST ADVANCED (first), stopping at the first match.
 //
-// issueStatus: the parent issue's current JIRA status name (from fetchIssueDetails).
-// Used to short-circuit parent-status checks without an extra API call.
+// Evaluating last-to-first ensures that a story qualifying for both Designing and
+// Coding gets classified as Coding — the more advanced and accurate status.
+//
+// issueStatus: the parent issue's JIRA status name, used to short-circuit
+// parent-status conditions locally without an extra API call.
 function classifyIssue(key, issueStatus, statusMappings, config) {
-  for (var i = 0; i < statusMappings.length; i++) {
+  for (var i = statusMappings.length - 1; i >= 0; i--) {
     var mapping = statusMappings[i];
     if (!mapping.jql || !mapping.jql.trim()) continue;
 

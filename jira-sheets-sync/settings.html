@@ -239,9 +239,11 @@
       <hr />
       <h3>Status Mappings</h3>
       <p class="note">
-        Enter the JIRA JQL for each status. Evaluation is ordered — first match
-        wins. BLOCKED and HOLD must stay at the top to take priority over all
-        workflow statuses.
+        Enter the JIRA JQL for each status. List statuses in progression order
+        (earliest stage first, most advanced last). The script evaluates from
+        most advanced to least advanced — so a story that qualifies for both
+        Designing and Coding gets Coding. BLOCKED and HOLD are handled
+        separately from this list and cannot be set by the sync.
       </p>
       <table>
         <thead>
