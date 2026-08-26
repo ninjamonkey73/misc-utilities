@@ -1,9 +1,3 @@
-// Column indices (1-based, matching confirmed sheet layout)
-const COL_JIRA_KEY = 6;  // F
-const COL_STATUS   = 9;  // I
-const COL_START    = 11; // K
-const COL_END      = 12; // L
-const COL_RESOLVED = 13; // M
 
 const DEFAULT_STATUS_MAPPINGS = [
   { label: 'Not Started',      jql: '' },
@@ -51,6 +45,11 @@ function loadConfig() {
     customFieldStartDate: sp.customFieldStartDate     || 'customfield_19601',
     customFieldEndDate:   sp.customFieldEndDate       || 'customfield_19602',
     notifyEmails:         sp.notifyEmails             || '',
+    headerJiraKey:        sp.headerJiraKey            || 'JIRA',
+    headerStatus:         sp.headerStatus             || 'Status',
+    headerStartDate:      sp.headerStartDate          || 'Target Start Date',
+    headerEndDate:        sp.headerEndDate            || 'Target End Date',
+    headerResolvedDate:   sp.headerResolvedDate       || 'Actual End Date',
     jiraUsername:         up.jiraUsername             || '',
     jiraToken:            up.jiraToken                || ''
   };
@@ -97,22 +96,82 @@ function runSyncInternal(triggeredBySchedule) {
       return;
     }
 
-    const scopeIssues  = fetchScopeIssues(config);
-    const scopeKeys    = scopeIssues.map(function(i) { return i.key; });
-    const keyToStatus  = classifyIssues(config.statusMappings, config, scopeKeys);
-    const keyToRow     = buildKeyMap(sheet);
-    const state        = loadState();
+    const cols     = resolveColumns(sheet, config); // finds columns by header name
+    const keyToRow = buildKeyMap(sheet, cols);
 
-    const { changes, newItems, missingItems } = detectChanges(
-      scopeIssues, keyToStatus, keyToRow, state
-    );
+    // ── PASS 1: scope fetch (keys + summaries only) for new/missing detection ──
+    const scopeItems  = fetchScopeKeys(config);
+    const scopeKeySet = {};
+    scopeItems.forEach(function(s) { scopeKeySet[s.key] = s.summary; });
 
-    if (changes.length > 0) {
-      writeChangesToSheet(changes, sheet);
-      saveState(scopeIssues, keyToStatus);
-    }
+    const sheetKeys = Object.keys(keyToRow);
 
-    sendDigestEmail(changes, newItems, missingItems, config, triggeredBySchedule);
+    const newItems = scopeItems.filter(function(s) { return !keyToRow[s.key]; });
+    const missingItems = sheetKeys
+      .filter(function(k) { return !scopeKeySet[k]; })
+      .map(function(k) {
+        return { key: k, row: keyToRow[k].row, lastStatus: keyToRow[k].currentStatus || 'Unknown' };
+      });
+
+    // ── PASS 2: per-row status classification + date fetch ──
+    // Ground truth is always the current cell values — no state dependency.
+    const changes     = [];
+    const unclassified = [];
+
+    sheetKeys.forEach(function(key) {
+      if (!scopeKeySet[key]) return; // missing item — skip
+
+      const cell = keyToRow[key];
+
+      // Freeze rows where a human has typed BLOCKED or HOLD.
+      // Only Complete overrides the freeze — no other automated status can clear it.
+      const cellIsManual = MANUAL_STATUSES.indexOf(cell.currentStatus) !== -1;
+
+      // Fetch issue details (JIRA status + date fields)
+      const issue  = fetchIssueDetails(key, config);
+
+      // Classify status; issue.jiraStatus short-circuits parent conditions locally
+      const status = classifyIssue(key, issue.jiraStatus, config.statusMappings, config);
+
+      if (cellIsManual && status !== 'Complete') return; // frozen
+
+      const fieldEdits = [];
+
+      if (!status) {
+        unclassified.push({ key: key, summary: issue.summary });
+      } else if (status !== cell.currentStatus) {
+        fieldEdits.push({ col: cols.colStatus, value: status, field: 'status',
+                          prevValue: cell.currentStatus });
+      }
+
+      // Date fields: only write when JIRA has a value and it differs from the cell.
+      // Empty JIRA fields are ignored — preserves manually entered dates.
+      if (issue.startDate && issue.startDate !== cell.currentStart) {
+        fieldEdits.push({ col: cols.colStart, value: issue.startDate, field: 'startDate',
+                          prevValue: cell.currentStart });
+      }
+      if (issue.targetEndDate && issue.targetEndDate !== cell.currentEnd) {
+        fieldEdits.push({ col: cols.colEnd, value: issue.targetEndDate, field: 'targetEndDate',
+                          prevValue: cell.currentEnd });
+      }
+      if (issue.actualEndDate && issue.actualEndDate !== cell.currentResolved) {
+        fieldEdits.push({ col: cols.colResolved, value: issue.actualEndDate, field: 'actualEndDate',
+                          prevValue: cell.currentResolved });
+      }
+
+      if (fieldEdits.length > 0) {
+        changes.push({
+          key:     key,
+          summary: issue.summary,
+          row:     cell.row,
+          fields:  fieldEdits
+        });
+      }
+    });
+
+    if (changes.length > 0) writeChangesToSheet(changes, sheet);
+
+    sendDigestEmail(changes, newItems, missingItems, unclassified, config, triggeredBySchedule);
 
     if (!triggeredBySchedule) {
       ss.toast(

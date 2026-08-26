@@ -12,14 +12,19 @@ const EXCLUDED_LABELS = ['BLOCKED', 'HOLD'];
 function getSettingsForDialog() {
   const config = loadConfig();
   return {
-    jiraBaseUrl:    config.jiraBaseUrl,
-    authType:       config.authType,
-    jiraUsername:   config.jiraUsername,
-    jiraToken:      config.jiraToken,
-    jqlQuery:       config.jqlQuery,
-    tabName:        config.tabName,
-    notifyEmails:   config.notifyEmails,
-    statusMappings: config.statusMappings.filter(function(m) {
+    jiraBaseUrl:        config.jiraBaseUrl,
+    authType:           config.authType,
+    jiraUsername:       config.jiraUsername,
+    jiraToken:          config.jiraToken,
+    jqlQuery:           config.jqlQuery,
+    tabName:            config.tabName,
+    notifyEmails:       config.notifyEmails,
+    headerJiraKey:      config.headerJiraKey,
+    headerStatus:       config.headerStatus,
+    headerStartDate:    config.headerStartDate,
+    headerEndDate:      config.headerEndDate,
+    headerResolvedDate: config.headerResolvedDate,
+    statusMappings:     config.statusMappings.filter(function(m) {
       return EXCLUDED_LABELS.indexOf(m.label) === -1;
     })
   };
@@ -28,11 +33,16 @@ function getSettingsForDialog() {
 // Called by the settings dialog on Save
 function saveSettingsFromDialog(formData) {
   PropertiesService.getScriptProperties().setProperties({
-    jiraBaseUrl:          formData.jiraBaseUrl    || '',
-    authType:             formData.authType        || 'basic',
-    jqlQuery:             formData.jqlQuery        || '',
-    tabName:              formData.tabName         || '',
-    notifyEmails:         formData.notifyEmails    || '',
+    jiraBaseUrl:          formData.jiraBaseUrl        || '',
+    authType:             formData.authType            || 'basic',
+    jqlQuery:             formData.jqlQuery            || '',
+    tabName:              formData.tabName             || '',
+    notifyEmails:         formData.notifyEmails        || '',
+    headerJiraKey:        formData.headerJiraKey       || 'JIRA',
+    headerStatus:         formData.headerStatus        || 'Status',
+    headerStartDate:      formData.headerStartDate     || 'Target Start Date',
+    headerEndDate:        formData.headerEndDate       || 'Target End Date',
+    headerResolvedDate:   formData.headerResolvedDate  || 'Actual End Date',
     statusMappings:       JSON.stringify(formData.statusMappings || DEFAULT_STATUS_MAPPINGS),
     customFieldStartDate: 'customfield_19601',
     customFieldEndDate:   'customfield_19602'

@@ -5,8 +5,9 @@ const FIELD_LABELS = {
   actualEndDate: 'Actual End Date'
 };
 
-function sendDigestEmail(changes, newItems, missingItems, config, triggeredBySchedule) {
-  const hasContent = changes.length > 0 || newItems.length > 0 || missingItems.length > 0;
+function sendDigestEmail(changes, newItems, missingItems, unclassified, config, triggeredBySchedule) {
+  unclassified = unclassified || [];
+  const hasContent = changes.length > 0 || newItems.length > 0 || missingItems.length > 0 || unclassified.length > 0;
   if (!hasContent) return;
 
   const recipient = triggeredBySchedule
@@ -30,7 +31,7 @@ function sendDigestEmail(changes, newItems, missingItems, config, triggeredBySch
       body += c.key + '  —  ' + c.summary + '\n';
       c.fields.forEach(function(f) {
         const label   = FIELD_LABELS[f.field] || f.field;
-        const prevVal = c.prev[f.field] || '(none)';
+        const prevVal = f.prevValue || '(empty)';
         body += '    ' + label + ': ' + prevVal + ' → ' + f.value + '\n';
       });
     });
@@ -52,6 +53,16 @@ function sendDigestEmail(changes, newItems, missingItems, config, triggeredBySch
             missingItems.length + '):\n\n';
     missingItems.forEach(function(i) {
       body += '  ' + i.key + '  —  Last known status: ' + i.lastStatus + '\n';
+    });
+    body += '\n';
+  }
+
+  if (unclassified.length > 0) {
+    body += divider;
+    body += 'UNCLASSIFIED ISSUES — no status mapping JQL matched (' + unclassified.length + '):\n';
+    body += 'Status column was NOT updated. Check your status mappings in Settings.\n\n';
+    unclassified.forEach(function(i) {
+      body += '  ' + i.key + '  —  ' + i.summary + '\n';
     });
     body += '\n';
   }

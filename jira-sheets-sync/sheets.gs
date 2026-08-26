@@ -1,93 +1,63 @@
-// Reads the JIRA key column and returns a map of key → 1-based row index
-function buildKeyMap(sheet) {
+const MANUAL_STATUSES = ['BLOCKED', 'HOLD'];
+
+// Reads row 1 of the sheet to find each managed column's index by header name.
+// Throws a descriptive error if a required header is missing.
+function resolveColumns(sheet, config) {
+  const headerRow = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const headerMap = {};
+  headerRow.forEach(function(h, i) {
+    const name = String(h || '').trim();
+    if (name) headerMap[name] = i + 1; // 1-based
+  });
+
+  function find(configKey, label) {
+    const name = config[configKey];
+    const col  = headerMap[name];
+    if (!col) {
+      throw new Error(
+        'Column header "' + name + '" (' + label + ') not found in row 1 of tab "' +
+        config.tabName + '". Check Settings → Column Headers.'
+      );
+    }
+    return col;
+  }
+
+  return {
+    colKey:      find('headerJiraKey',      'JIRA Key'),
+    colStatus:   find('headerStatus',       'Status'),
+    colStart:    find('headerStartDate',    'Start Date'),
+    colEnd:      find('headerEndDate',      'Target End Date'),
+    colResolved: find('headerResolvedDate', 'Actual End Date')
+  };
+}
+
+// Reads all script-managed columns for every row in one range call.
+// Returns a map of jiraKey -> { row, currentStatus, currentStart, currentEnd, currentResolved }.
+function buildKeyMap(sheet, cols) {
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return {};
 
-  const values = sheet.getRange(2, COL_JIRA_KEY, lastRow - 1, 1).getValues();
+  const minCol  = Math.min(cols.colKey, cols.colStatus, cols.colStart, cols.colEnd, cols.colResolved);
+  const maxCol  = Math.max(cols.colKey, cols.colStatus, cols.colStart, cols.colEnd, cols.colResolved);
+  const numCols = maxCol - minCol + 1;
+
+  const values = sheet.getRange(2, minCol, lastRow - 1, numCols).getValues();
   const map    = {};
 
   values.forEach(function(row, i) {
-    const key = String(row[0] || '').trim();
-    if (key) map[key] = i + 2;
+    const key = String(row[cols.colKey - minCol] || '').trim();
+    if (!key) return;
+
+    map[key] = {
+      row:             i + 2,
+      currentStatus:   String(row[cols.colStatus   - minCol] || '').trim(),
+      currentStart:    String(row[cols.colStart     - minCol] || '').trim(),
+      currentEnd:      String(row[cols.colEnd       - minCol] || '').trim(),
+      currentResolved: String(row[cols.colResolved  - minCol] || '').trim()
+    };
   });
 
   return map;
-}
-
-const MANUAL_STATUSES = ['BLOCKED', 'HOLD'];
-
-// Compares current JIRA data against prior state and the sheet key map.
-// Returns three lists: field-level changes, new JIRA issues with no sheet row,
-// and sheet rows whose JIRA key was absent from the scope fetch.
-function detectChanges(scopeIssues, keyToStatus, keyToRow, state) {
-  const changes      = [];
-  const newItems     = [];
-  const missingItems = [];
-  const scopeKeySet  = {};
-
-  scopeIssues.forEach(function(issue) {
-    scopeKeySet[issue.key] = true;
-
-    if (!keyToRow[issue.key]) {
-      newItems.push(issue);
-      return;
-    }
-
-    const prev   = state[issue.key] || {};
-    const status = keyToStatus[issue.key] || 'Needs Review';
-    const row    = keyToRow[issue.key];
-
-    // BLOCKED and HOLD are human-set designations. Skip all updates for these
-    // rows unless the story has reached Complete, in which case it overrides.
-    const isManuallyFlagged = MANUAL_STATUSES.indexOf(prev.status) !== -1;
-    if (isManuallyFlagged && status !== 'Complete') return;
-
-    const fieldEdits = [];
-
-    if (status !== prev.status) {
-      fieldEdits.push({ col: COL_STATUS, value: status, field: 'status' });
-    }
-    // Only write date fields when JIRA has a non-null value — preserves
-    // manually entered dates for teams not using JIRA date fields
-    if (issue.startDate && issue.startDate !== prev.startDate) {
-      fieldEdits.push({ col: COL_START, value: issue.startDate, field: 'startDate' });
-    }
-    if (issue.targetEndDate && issue.targetEndDate !== prev.targetEndDate) {
-      fieldEdits.push({ col: COL_END, value: issue.targetEndDate, field: 'targetEndDate' });
-    }
-    if (issue.actualEndDate && issue.actualEndDate !== prev.actualEndDate) {
-      fieldEdits.push({ col: COL_RESOLVED, value: issue.actualEndDate, field: 'actualEndDate' });
-    }
-
-    if (fieldEdits.length > 0) {
-      changes.push({
-        key:     issue.key,
-        summary: issue.summary,
-        row:     row,
-        prev:    prev,
-        current: {
-          status:        status,
-          startDate:     issue.startDate,
-          targetEndDate: issue.targetEndDate,
-          actualEndDate: issue.actualEndDate
-        },
-        fields: fieldEdits
-      });
-    }
-  });
-
-  // Sheet rows whose key wasn't in the JIRA scope results
-  Object.keys(keyToRow).forEach(function(key) {
-    if (!scopeKeySet[key]) {
-      missingItems.push({
-        key:        key,
-        row:        keyToRow[key],
-        lastStatus: (state[key] || {}).status || 'Unknown'
-      });
-    }
-  });
-
-  return { changes: changes, newItems: newItems, missingItems: missingItems };
 }
 
 function writeChangesToSheet(changes, sheet) {

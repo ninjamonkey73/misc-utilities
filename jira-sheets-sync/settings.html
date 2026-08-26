@@ -210,6 +210,33 @@
       </div>
 
       <hr />
+      <h3>Column Headers</h3>
+      <p class="note">
+        Enter the exact text of the header row (row 1) for each managed column.
+        The script finds columns by header name, so inserted columns won't break anything.
+      </p>
+      <div class="row">
+        <label>JIRA Key</label>
+        <input type="text" id="headerJiraKey" placeholder="JIRA" />
+      </div>
+      <div class="row">
+        <label>Status</label>
+        <input type="text" id="headerStatus" placeholder="Status" />
+      </div>
+      <div class="row">
+        <label>Start Date</label>
+        <input type="text" id="headerStartDate" placeholder="Target Start Date" />
+      </div>
+      <div class="row">
+        <label>Target End Date</label>
+        <input type="text" id="headerEndDate" placeholder="Target End Date" />
+      </div>
+      <div class="row">
+        <label>Actual End Date</label>
+        <input type="text" id="headerResolvedDate" placeholder="Actual End Date" />
+      </div>
+
+      <hr />
       <h3>Status Mappings</h3>
       <p class="note">
         Enter the JIRA JQL for each status. Evaluation is ordered — first match
@@ -323,14 +350,19 @@
         });
 
         var data = {
-          jiraBaseUrl:    document.getElementById("jiraBaseUrl").value.trim(),
-          authType:       document.getElementById("authType").value,
-          jiraUsername:   document.getElementById("jiraUsername").value.trim(),
-          jiraToken:      document.getElementById("jiraToken").value,
-          jqlQuery:       document.getElementById("jqlQuery").value.trim(),
-          tabName:        document.getElementById("tabName").value.trim(),
-          notifyEmails:   document.getElementById("notifyEmails").value.trim(),
-          statusMappings: mappings,
+          jiraBaseUrl:        document.getElementById("jiraBaseUrl").value.trim(),
+          authType:           document.getElementById("authType").value,
+          jiraUsername:       document.getElementById("jiraUsername").value.trim(),
+          jiraToken:          document.getElementById("jiraToken").value,
+          jqlQuery:           document.getElementById("jqlQuery").value.trim(),
+          tabName:            document.getElementById("tabName").value.trim(),
+          notifyEmails:       document.getElementById("notifyEmails").value.trim(),
+          headerJiraKey:      document.getElementById("headerJiraKey").value.trim(),
+          headerStatus:       document.getElementById("headerStatus").value.trim(),
+          headerStartDate:    document.getElementById("headerStartDate").value.trim(),
+          headerEndDate:      document.getElementById("headerEndDate").value.trim(),
+          headerResolvedDate: document.getElementById("headerResolvedDate").value.trim(),
+          statusMappings:     mappings,
         };
 
         var btn = document.getElementById("saveBtn");
@@ -352,13 +384,18 @@
       // Load on open
       google.script.run
         .withSuccessHandler(function (s) {
-          document.getElementById("jiraBaseUrl").value  = s.jiraBaseUrl  || "";
-          document.getElementById("authType").value      = s.authType     || "basic";
-          document.getElementById("jiraUsername").value  = s.jiraUsername || "";
-          document.getElementById("jiraToken").value     = s.jiraToken    || "";
-          document.getElementById("jqlQuery").value      = s.jqlQuery     || "";
-          document.getElementById("tabName").value       = s.tabName      || "";
-          document.getElementById("notifyEmails").value  = s.notifyEmails || "";
+          document.getElementById("jiraBaseUrl").value      = s.jiraBaseUrl        || "";
+          document.getElementById("authType").value          = s.authType           || "basic";
+          document.getElementById("jiraUsername").value      = s.jiraUsername       || "";
+          document.getElementById("jiraToken").value         = s.jiraToken          || "";
+          document.getElementById("jqlQuery").value          = s.jqlQuery           || "";
+          document.getElementById("tabName").value           = s.tabName            || "";
+          document.getElementById("notifyEmails").value      = s.notifyEmails       || "";
+          document.getElementById("headerJiraKey").value     = s.headerJiraKey      || "JIRA";
+          document.getElementById("headerStatus").value      = s.headerStatus       || "Status";
+          document.getElementById("headerStartDate").value   = s.headerStartDate    || "Target Start Date";
+          document.getElementById("headerEndDate").value     = s.headerEndDate      || "Target End Date";
+          document.getElementById("headerResolvedDate").value= s.headerResolvedDate || "Actual End Date";
           mappings = s.statusMappings || [];
           updateAuthFields(); // apply visibility based on loaded auth type
           renderMappings();

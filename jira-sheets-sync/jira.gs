@@ -36,46 +36,51 @@ function jiraRequest_(config, path, params) {
   return JSON.parse(text);
 }
 
-// Full scope fetch — returns all issues matching the main JQL with date fields
-function fetchScopeIssues(config) {
-  const fields = [
-    'key',
-    'summary',
-    config.customFieldStartDate,
-    config.customFieldEndDate,
-    'resolutiondate'
-  ].join(',');
-
-  const allIssues = [];
-  let startAt = 0;
+// Pass 1: fetch only keys + summaries from the scope JQL.
+// Used for new/missing detection only — does NOT fetch date fields.
+function fetchScopeKeys(config) {
+  const items  = [];
+  let startAt  = 0;
 
   do {
     const data = jiraRequest_(config, '/rest/api/2/search', {
       jql:        config.jqlQuery,
-      fields:     fields,
+      fields:     'key,summary',
       maxResults: 100,
       startAt:    startAt
     });
 
-    // Log field keys on first page to verify customfield suffix (-val or not)
-    if (startAt === 0 && data.issues && data.issues.length > 0) {
-      Logger.log('[JIRA Sync] Sample issue field keys: ' +
-        JSON.stringify(Object.keys(data.issues[0].fields)));
-    }
-
     (data.issues || []).forEach(function(issue) {
-      allIssues.push(parseIssue_(issue, config));
+      items.push({ key: issue.key, summary: (issue.fields || {}).summary || '' });
     });
 
     startAt += 100;
     if (startAt >= (data.total || 0)) break;
   } while (true);
 
-  return allIssues;
+  return items; // array of { key, summary }
+}
+
+// Pass 2: fetch full details for one specific issue (status + date fields).
+function fetchIssueDetails(key, config) {
+  const fieldsList = [
+    'key',
+    'summary',
+    'status',
+    config.customFieldStartDate,
+    config.customFieldEndDate,
+    'resolutiondate'
+  ].join(',');
+
+  const data = jiraRequest_(config, '/rest/api/2/issue/' + encodeURIComponent(key), {
+    fields: fieldsList
+  });
+
+  return parseIssue_(data, config);
 }
 
 function parseIssue_(issue, config) {
-  const f = issue.fields;
+  const f = issue.fields || {};
 
   // Handle potential -val suffix returned by some JIRA DC instances
   const startDate = f[config.customFieldStartDate] ||
@@ -86,38 +91,28 @@ function parseIssue_(issue, config) {
   return {
     key:           issue.key,
     summary:       f.summary || '',
-    startDate:     startDate     ? String(startDate).substring(0, 10)     : null,
-    targetEndDate: endDate       ? String(endDate).substring(0, 10)       : null,
+    jiraStatus:    (f.status && f.status.name) ? f.status.name : '',
+    startDate:     startDate        ? String(startDate).substring(0, 10)        : null,
+    targetEndDate: endDate          ? String(endDate).substring(0, 10)          : null,
     actualEndDate: f.resolutiondate ? String(f.resolutiondate).substring(0, 10) : null
   };
 }
 
-// Lightweight key-only fetch for a single swimlane JQL.
-// maxResults defaults to 500 but callers can pass a smaller cap (e.g. scope size).
-function fetchKeysByJql(jql, config, maxResults) {
-  if (!jql || !jql.trim()) return [];
+// Check whether a single issue key matches a given JQL.
+// Uses maxResults=0 — JIRA returns total without fetching any records.
+function checkIssueMatchesJql(key, jql, config) {
+  if (!jql || !jql.trim()) return false;
 
-  maxResults = maxResults || 500;
-  const keys = [];
-  let startAt = 0;
+  const data = jiraRequest_(config, '/rest/api/2/search', {
+    jql:        '(' + jql + ') AND key = ' + key,
+    fields:     'key',
+    maxResults: 0
+  });
 
-  do {
-    const data = jiraRequest_(config, '/rest/api/2/search', {
-      jql:        jql,
-      fields:     'key',
-      maxResults: maxResults,
-      startAt:    startAt
-    });
-
-    (data.issues || []).forEach(function(issue) { keys.push(issue.key); });
-    startAt += maxResults;
-    if (startAt >= (data.total || 0)) break;
-  } while (true);
-
-  return keys;
+  return (data.total || 0) > 0;
 }
 
-// maxResults=0 trick: JIRA returns total count without fetching any records
+// Kept for the Test button in the settings dialog.
 function testJqlCount(jql, config) {
   if (!jql || !jql.trim()) return { count: 0, error: null };
 
@@ -131,4 +126,27 @@ function testJqlCount(jql, config) {
   } catch (e) {
     return { count: 0, error: e.message };
   }
+}
+
+// Generic paginated key fetch — used by testJqlCount path only.
+function fetchKeysByJql(jql, config) {
+  if (!jql || !jql.trim()) return [];
+
+  const keys   = [];
+  let startAt  = 0;
+
+  do {
+    const data = jiraRequest_(config, '/rest/api/2/search', {
+      jql:        jql,
+      fields:     'key',
+      maxResults: 500,
+      startAt:    startAt
+    });
+
+    (data.issues || []).forEach(function(issue) { keys.push(issue.key); });
+    startAt += 500;
+    if (startAt >= (data.total || 0)) break;
+  } while (true);
+
+  return keys;
 }

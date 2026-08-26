@@ -12,25 +12,7 @@ function loadState() {
   }
 }
 
-function saveState(scopeIssues, keyToStatus) {
-  const state = {};
-  const now   = new Date().toISOString();
-
-  scopeIssues.forEach(function(issue) {
-    state[issue.key] = {
-      status:        keyToStatus[issue.key] || 'Needs Review',
-      startDate:     issue.startDate,
-      targetEndDate: issue.targetEndDate,
-      actualEndDate: issue.actualEndDate,
-      syncedAt:      now
-    };
-  });
-
-  PropertiesService.getScriptProperties()
-    .setProperty(STATE_PROPERTY_KEY, JSON.stringify(state));
-}
-
-// Utility — call from Script Editor if you need to force a full re-sync
+// Utility — call from Script Editor to force a full re-sync on next run
 function clearState() {
   PropertiesService.getScriptProperties().deleteProperty(STATE_PROPERTY_KEY);
   Logger.log('[JIRA Sync] State cleared.');
