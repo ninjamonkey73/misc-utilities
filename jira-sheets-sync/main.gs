@@ -94,7 +94,17 @@ function runSyncInternal_(tabName, triggeredBySchedule) {
 
   if (!config.jiraBaseUrl || !config.jiraToken ||
       (config.authType !== 'pat' && !config.jiraUsername)) {
-    if (!triggeredBySchedule) openSettingsDialog();
+    if (triggeredBySchedule) {
+      // Scheduled triggers run as the trigger owner — if their credentials are
+      // missing from User Properties, log clearly so the trigger owner knows.
+      Logger.log(
+        '[JIRA Sync] Scheduled run for tab "' + tabName + '" failed: ' +
+        'JIRA credentials not found for the trigger owner account. ' +
+        'Open Settings on this sheet and save your credentials while signed in as the trigger owner.'
+      );
+    } else {
+      openSettingsDialog();
+    }
     return;
   }
 
