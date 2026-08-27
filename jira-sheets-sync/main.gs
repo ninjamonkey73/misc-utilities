@@ -1,4 +1,3 @@
-
 const DEFAULT_STATUS_MAPPINGS = [
   { label: 'Not Started',      jql: '' },
   { label: 'Researching',      jql: '' },
@@ -18,61 +17,84 @@ const DEFAULT_STATUS_MAPPINGS = [
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('JIRA Sync')
-    .addItem('Run Now', 'runSync')
+    .addItem('Run Now',  'runSync')
     .addSeparator()
     .addItem('Settings', 'openSettingsDialog')
-    .addItem('Set Up Daily Trigger', 'setupDailyTrigger')
+    .addItem('Add This Tab to Daily Schedule', 'setupDailyTrigger')
     .addToUi();
 }
 
-function loadConfig() {
-  const sp = PropertiesService.getScriptProperties().getProperties();
-  const up = PropertiesService.getUserProperties().getProperties();
+// Loads global settings merged with per-tab overrides.
+// tabName is optional; omit for global-only access.
+function loadConfig(tabName) {
+  const sp     = PropertiesService.getScriptProperties().getProperties();
+  const up     = PropertiesService.getUserProperties().getProperties();
+  const prefix = tabName ? 'tab::' + tabName + '::' : '';
 
   let statusMappings;
-  try {
-    statusMappings = sp.statusMappings ? JSON.parse(sp.statusMappings) : DEFAULT_STATUS_MAPPINGS;
-  } catch (e) {
-    statusMappings = DEFAULT_STATUS_MAPPINGS;
+  // Per-tab override
+  if (tabName && sp[prefix + 'statusMappings']) {
+    try { statusMappings = JSON.parse(sp[prefix + 'statusMappings']); } catch(e) {}
   }
+  // New global key
+  if (!statusMappings && sp.defaultStatusMappings) {
+    try { statusMappings = JSON.parse(sp.defaultStatusMappings); } catch(e) {}
+  }
+  // Fallback: old key from pre-migration design
+  if (!statusMappings && sp.statusMappings) {
+    try { statusMappings = JSON.parse(sp.statusMappings); } catch(e) {}
+  }
+  statusMappings = statusMappings || DEFAULT_STATUS_MAPPINGS;
 
   return {
     jiraBaseUrl:          sp.jiraBaseUrl              || '',
-    jqlQuery:             sp.jqlQuery                 || '',
-    tabName:              sp.tabName                  || '',
-    statusMappings:       statusMappings,
     authType:             sp.authType                 || 'basic',
     customFieldStartDate: sp.customFieldStartDate     || 'customfield_19601',
     customFieldEndDate:   sp.customFieldEndDate       || 'customfield_19602',
-    notifyEmails:         sp.notifyEmails             || '',
     headerJiraKey:        sp.headerJiraKey            || 'JIRA',
     headerStatus:         sp.headerStatus             || 'Status',
     headerStartDate:      sp.headerStartDate          || 'Target Start Date',
     headerEndDate:        sp.headerEndDate            || 'Target End Date',
     headerResolvedDate:   sp.headerResolvedDate       || 'Actual End Date',
+    tabName:              tabName || '',
+    jqlQuery:             sp[prefix + 'jqlQuery']     || '',
+    notifyEmails:         sp[prefix + 'notifyEmails'] || '',
+    statusMappings:       statusMappings,
     jiraUsername:         up.jiraUsername             || '',
     jiraToken:            up.jiraToken                || ''
   };
 }
 
-// Entry point for manual "Run Now" menu click
+// Manual "Run Now" — uses the active sheet tab, shows approval dialog
 function runSync() {
-  runSyncInternal(false);
+  const tabName = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet().getName();
+  runSyncInternal_(tabName, false);
 }
 
-// Entry point for the daily time-based trigger
+// Daily trigger — runs all scheduled tabs directly (no approval dialog)
 function runSyncScheduled() {
-  runSyncInternal(true);
+  let scheduledTabs;
+  try {
+    scheduledTabs = JSON.parse(
+      PropertiesService.getScriptProperties().getProperty('scheduledTabs') || '[]'
+    );
+  } catch(e) { scheduledTabs = []; }
+
+  scheduledTabs.forEach(function(tabName) {
+    try {
+      runSyncInternal_(tabName, true);
+    } catch(e) {
+      Logger.log('Error syncing tab "' + tabName + '": ' + e.message + '\n' + e.stack);
+    }
+  });
 }
 
-function runSyncInternal(triggeredBySchedule) {
-  const config = loadConfig();
+function runSyncInternal_(tabName, triggeredBySchedule) {
+  const config = loadConfig(tabName);
 
-  // First-run guard: open settings if credentials or base URL are missing
-  if (!config.jiraBaseUrl || !config.jiraUsername || !config.jiraToken) {
-    if (!triggeredBySchedule) {
-      openSettingsDialog();
-    }
+  if (!config.jiraBaseUrl || !config.jiraToken ||
+      (config.authType !== 'pat' && !config.jiraUsername)) {
+    if (!triggeredBySchedule) openSettingsDialog();
     return;
   }
 
@@ -87,120 +109,126 @@ function runSyncInternal(triggeredBySchedule) {
 
   try {
     const ss    = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName(config.tabName);
+    const sheet = ss.getSheetByName(tabName);
 
     if (!sheet) {
       if (!triggeredBySchedule) {
-        SpreadsheetApp.getUi().alert('Sheet tab "' + config.tabName + '" not found. Check Settings.');
+        SpreadsheetApp.getUi().alert(
+          'Sheet tab "' + tabName + '" not found. Check Settings.'
+        );
       }
       return;
     }
 
-    const cols     = resolveColumns(sheet, config); // finds columns by header name
-    const keyToRow = buildKeyMap(sheet, cols);
+    const pending = computePendingChanges_(sheet, config);
 
-    // ── PASS 1: scope fetch (keys + summaries only) for new/missing detection ──
-    const scopeItems  = fetchScopeKeys(config);
-    const scopeKeySet = {};
-    scopeItems.forEach(function(s) { scopeKeySet[s.key] = s.summary; });
-
-    const sheetKeys = Object.keys(keyToRow);
-
-    const newItems = scopeItems.filter(function(s) { return !keyToRow[s.key]; });
-    const missingItems = sheetKeys
-      .filter(function(k) { return !scopeKeySet[k]; })
-      .map(function(k) {
-        return { key: k, row: keyToRow[k].row, lastStatus: keyToRow[k].currentStatus || 'Unknown' };
-      });
-
-    // ── PASS 2: per-row status classification + date fetch ──
-    // Ground truth is always the current cell values — no state dependency.
-    const changes     = [];
-    const unclassified = [];
-
-    sheetKeys.forEach(function(key) {
-      if (!scopeKeySet[key]) return; // missing item — skip
-
-      const cell = keyToRow[key];
-
-      // Freeze rows where a human has typed BLOCKED or HOLD.
-      // Only Complete overrides the freeze — no other automated status can clear it.
-      const cellIsManual = MANUAL_STATUSES.indexOf(cell.currentStatus) !== -1;
-
-      // Fetch issue details (JIRA status + date fields)
-      const issue  = fetchIssueDetails(key, config);
-
-      // Classify status; issue.jiraStatus short-circuits parent conditions locally
-      const status = classifyIssue(key, issue.jiraStatus, config.statusMappings, config);
-
-      if (cellIsManual && status !== 'Complete') return; // frozen
-
-      const fieldEdits = [];
-
-      if (!status) {
-        unclassified.push({ key: key, summary: issue.summary });
-      } else if (status !== cell.currentStatus) {
-        fieldEdits.push({ col: cols.colStatus, value: status, field: 'status',
-                          prevValue: cell.currentStatus });
-      }
-
-      // Date fields: only write when JIRA has a value and it differs from the cell.
-      // Empty JIRA fields are ignored — preserves manually entered dates.
-      if (issue.startDate && issue.startDate !== cell.currentStart) {
-        fieldEdits.push({ col: cols.colStart, value: issue.startDate, field: 'startDate',
-                          prevValue: cell.currentStart });
-      }
-      if (issue.targetEndDate && issue.targetEndDate !== cell.currentEnd) {
-        fieldEdits.push({ col: cols.colEnd, value: issue.targetEndDate, field: 'targetEndDate',
-                          prevValue: cell.currentEnd });
-      }
-      if (issue.actualEndDate && issue.actualEndDate !== cell.currentResolved) {
-        fieldEdits.push({ col: cols.colResolved, value: issue.actualEndDate, field: 'actualEndDate',
-                          prevValue: cell.currentResolved });
-      }
-
-      if (fieldEdits.length > 0) {
-        changes.push({
-          key:     key,
-          summary: issue.summary,
-          row:     cell.row,
-          fields:  fieldEdits
-        });
-      }
-    });
-
-    if (changes.length > 0) writeChangesToSheet(changes, sheet);
-
-    sendDigestEmail(changes, newItems, missingItems, unclassified, config, triggeredBySchedule);
-
-    if (!triggeredBySchedule) {
-      ss.toast(
-        'Sync complete — ' + changes.length + ' change(s). Open "JIRA Sync → Settings" to reconfigure.',
-        'JIRA Sync',
-        8
+    if (triggeredBySchedule) {
+      if (pending.changes.length > 0) writeChangesToSheet(pending.changes, sheet);
+      sendDigestEmail(
+        pending.changes, pending.newItems, pending.missingItems,
+        pending.unclassified, config, true
       );
+    } else {
+      const hasContent = pending.changes.length > 0   || pending.newItems.length > 0 ||
+                         pending.missingItems.length > 0 || pending.unclassified.length > 0;
+      if (!hasContent) {
+        ss.toast('No changes detected for tab "' + tabName + '".', 'JIRA Sync', 4);
+        return;
+      }
+      PropertiesService.getScriptProperties()
+        .setProperty('pendingApproval', JSON.stringify(pending));
+      openApprovalDialog();
     }
-  } catch (e) {
+
+  } catch(e) {
     Logger.log('JIRA Sync error: ' + e.message + '\n' + e.stack);
-    if (!triggeredBySchedule) {
-      SpreadsheetApp.getUi().alert('Sync failed: ' + e.message);
-    }
+    if (!triggeredBySchedule) SpreadsheetApp.getUi().alert('Sync failed: ' + e.message);
   } finally {
     lock.releaseLock();
   }
 }
 
-function setupDailyTrigger() {
-  ScriptApp.getProjectTriggers().forEach(function(t) {
-    if (t.getHandlerFunction() === 'runSyncScheduled') ScriptApp.deleteTrigger(t);
+// Computes all proposed changes without writing anything to the sheet.
+function computePendingChanges_(sheet, config) {
+  const cols    = resolveColumns(sheet, config);
+  const keyToRow = buildKeyMap(sheet, cols);
+
+  const scopeItems  = fetchScopeKeys(config);
+  const scopeKeySet = {};
+  scopeItems.forEach(function(s) { scopeKeySet[s.key] = s.summary; });
+
+  const sheetKeys = Object.keys(keyToRow);
+
+  const newItems = scopeItems.filter(function(s) { return !keyToRow[s.key]; });
+  const missingItems = sheetKeys
+    .filter(function(k) { return !scopeKeySet[k]; })
+    .map(function(k) {
+      return { key: k, row: keyToRow[k].row, lastStatus: keyToRow[k].currentStatus || 'Unknown' };
+    });
+
+  const changes      = [];
+  const unclassified = [];
+
+  sheetKeys.forEach(function(key) {
+    if (!scopeKeySet[key]) return;
+
+    const cell         = keyToRow[key];
+    const cellIsManual = MANUAL_STATUSES.indexOf(cell.currentStatus) !== -1;
+    const issue        = fetchIssueDetails(key, config);
+    const status       = classifyIssue(key, issue.jiraStatus, config.statusMappings, config);
+
+    if (cellIsManual && status !== 'Complete') return;
+
+    const fieldEdits = [];
+
+    if (!status) {
+      unclassified.push({ key: key, summary: issue.summary });
+    } else if (status !== cell.currentStatus) {
+      fieldEdits.push({ col: cols.colStatus, value: status, field: 'status',
+                        prevValue: cell.currentStatus });
+    }
+    if (issue.startDate && issue.startDate !== cell.currentStart) {
+      fieldEdits.push({ col: cols.colStart, value: issue.startDate, field: 'startDate',
+                        prevValue: cell.currentStart });
+    }
+    if (issue.targetEndDate && issue.targetEndDate !== cell.currentEnd) {
+      fieldEdits.push({ col: cols.colEnd, value: issue.targetEndDate, field: 'targetEndDate',
+                        prevValue: cell.currentEnd });
+    }
+    if (issue.actualEndDate && issue.actualEndDate !== cell.currentResolved) {
+      fieldEdits.push({ col: cols.colResolved, value: issue.actualEndDate, field: 'actualEndDate',
+                        prevValue: cell.currentResolved });
+    }
+
+    if (fieldEdits.length > 0) {
+      changes.push({ key: key, summary: issue.summary, row: cell.row, fields: fieldEdits });
+    }
   });
 
-  ScriptApp.newTrigger('runSyncScheduled')
-    .timeBased()
-    .everyDays(1)
-    .atHour(8)
-    .create();
+  return { tabName: config.tabName, changes: changes, newItems: newItems,
+           missingItems: missingItems, unclassified: unclassified };
+}
+
+// Adds the active tab to the scheduled tabs list and sets up the trigger if needed.
+function setupDailyTrigger() {
+  const tabName = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet().getName();
+  const sp      = PropertiesService.getScriptProperties();
+
+  let scheduledTabs;
+  try { scheduledTabs = JSON.parse(sp.getProperty('scheduledTabs') || '[]'); } catch(e) { scheduledTabs = []; }
+
+  if (scheduledTabs.indexOf(tabName) === -1) {
+    scheduledTabs.push(tabName);
+    sp.setProperty('scheduledTabs', JSON.stringify(scheduledTabs));
+  }
+
+  const hasTimeTrigger = ScriptApp.getProjectTriggers().some(function(t) {
+    return t.getHandlerFunction() === 'runSyncScheduled';
+  });
+  if (!hasTimeTrigger) {
+    ScriptApp.newTrigger('runSyncScheduled').timeBased().everyDays(1).atHour(8).create();
+  }
 
   SpreadsheetApp.getActiveSpreadsheet()
-    .toast('Daily trigger set for 8 AM.', 'JIRA Sync', 4);
+    .toast('"' + tabName + '" added to daily sync at 8 AM.', 'JIRA Sync', 4);
 }

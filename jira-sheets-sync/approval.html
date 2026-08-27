@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en-US">
+<head>
+  <base target="_top" />
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; font-size: 13px; padding: 10px 16px 0; margin: 0; color: #333; }
+    #loading { padding: 20px 0; color: #666; }
+    h3 { margin: 12px 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: #555; }
+    .section { margin-bottom: 14px; }
+    .change-row {
+      display: flex; align-items: flex-start; gap: 8px;
+      padding: 7px 0; border-bottom: 1px solid #eee;
+    }
+    .change-row:last-child { border-bottom: none; }
+    input[type=checkbox] { margin-top: 3px; flex-shrink: 0; width: 15px; height: 15px; cursor: pointer; }
+    .change-body { flex: 1; }
+    .issue-key { font-weight: bold; color: #1a73e8; }
+    .issue-summary { color: #555; font-size: 12px; margin-left: 4px; }
+    .field-row { font-size: 12px; margin-top: 3px; color: #444; }
+    .field-name { font-weight: bold; margin-right: 4px; }
+    .prev { color: #c0392b; }
+    .next { color: #2a7d2a; }
+    .arrow { color: #999; margin: 0 4px; }
+    .info-list { font-size: 12px; color: #666; margin: 0; padding-left: 16px; }
+    .info-list li { margin-bottom: 2px; }
+    .section-title { font-size: 12px; font-weight: bold; color: #555; margin-bottom: 4px; }
+    .empty-note { font-size: 12px; color: #999; font-style: italic; }
+    .footer {
+      display: flex; gap: 8px; padding: 10px 0;
+      position: sticky; bottom: 0; background: white;
+      border-top: 1px solid #e0e0e0; margin-top: 8px;
+    }
+    .btn-apply {
+      padding: 7px 22px; background: #1a73e8; color: white;
+      border: none; border-radius: 4px; cursor: pointer; font-size: 13px;
+    }
+    .btn-apply:disabled { background: #9ab8e8; cursor: default; }
+    .btn-apply:hover:not(:disabled) { background: #1558b0; }
+    .btn-cancel {
+      padding: 7px 14px; background: #e8e8e8;
+      border: none; border-radius: 4px; cursor: pointer; font-size: 13px;
+    }
+    .select-links { font-size: 12px; color: #1a73e8; cursor: pointer; margin-left: auto; align-self: center; }
+    .select-links span { margin-left: 10px; }
+    #count-msg { font-size: 12px; color: #555; }
+  </style>
+</head>
+<body>
+  <div id="loading">Loading proposed changes…</div>
+  <div id="content" style="display:none">
+
+    <div class="section" id="changes-section">
+      <div class="section-title" id="changes-title"></div>
+      <div id="changes-list"></div>
+    </div>
+
+    <div class="section" id="new-section" style="display:none">
+      <div class="section-title"></div>
+      <ul class="info-list" id="new-list"></ul>
+    </div>
+
+    <div class="section" id="missing-section" style="display:none">
+      <div class="section-title"></div>
+      <ul class="info-list" id="missing-list"></ul>
+    </div>
+
+    <div class="section" id="unclassified-section" style="display:none">
+      <div class="section-title"></div>
+      <ul class="info-list" id="unclassified-list"></ul>
+    </div>
+
+    <div class="footer">
+      <button class="btn-apply" id="applyBtn" onclick="apply()" disabled>Apply Selected</button>
+      <button class="btn-cancel" onclick="cancel()">Cancel</button>
+      <div class="select-links">
+        <span onclick="selectAll(true)">Select all</span>
+        <span onclick="selectAll(false)">Deselect all</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    var pending = null;
+
+    var FIELD_LABELS = {
+      status: 'Status', startDate: 'Start Date',
+      targetEndDate: 'Target End Date', actualEndDate: 'Actual End Date'
+    };
+
+    function esc(s) {
+      return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    function renderChanges(data) {
+      pending = data;
+      if (!data) {
+        document.getElementById('loading').textContent = 'No pending changes found. Please run sync again.';
+        return;
+      }
+
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('content').style.display = 'block';
+
+      var changes = data.changes || [];
+      var newItems = data.newItems || [];
+      var missingItems = data.missingItems || [];
+      var unclassified = data.unclassified || [];
+
+      // Status changes with checkboxes
+      var titleEl = document.getElementById('changes-title');
+      var listEl  = document.getElementById('changes-list');
+      if (changes.length > 0) {
+        titleEl.textContent = changes.length + ' proposed change' + (changes.length !== 1 ? 's' : '') +
+          ' — uncheck any you want to skip:';
+        changes.forEach(function(c) {
+          var div = document.createElement('div');
+          div.className = 'change-row';
+          var fields = (c.fields || []).map(function(f) {
+            return '<div class="field-row"><span class="field-name">' +
+              esc(FIELD_LABELS[f.field] || f.field) + ':</span>' +
+              '<span class="prev">' + esc(f.prevValue || '(empty)') + '</span>' +
+              '<span class="arrow">→</span>' +
+              '<span class="next">' + esc(f.value) + '</span></div>';
+          }).join('');
+          div.innerHTML =
+            '<input type="checkbox" id="cb_' + esc(c.key) + '" checked onchange="updateCount()">' +
+            '<div class="change-body">' +
+            '<span class="issue-key">' + esc(c.key) + '</span>' +
+            '<span class="issue-summary">— ' + esc(c.summary) + '</span>' +
+            fields + '</div>';
+          listEl.appendChild(div);
+        });
+        updateCount();
+      } else {
+        titleEl.textContent = 'No status or date changes detected for existing rows.';
+      }
+
+      // New items (informational, no checkboxes)
+      if (newItems.length > 0) {
+        var ns = document.getElementById('new-section');
+        ns.style.display = '';
+        ns.querySelector('.section-title').textContent =
+          newItems.length + ' new JIRA issue' + (newItems.length !== 1 ? 's' : '') +
+          ' not in sheet — please add manually:';
+        var ul = document.getElementById('new-list');
+        newItems.forEach(function(i) {
+          var li = document.createElement('li');
+          li.textContent = i.key + (i.summary ? ' — ' + i.summary : '');
+          ul.appendChild(li);
+        });
+      }
+
+      // Missing items
+      if (missingItems.length > 0) {
+        var ms = document.getElementById('missing-section');
+        ms.style.display = '';
+        ms.querySelector('.section-title').textContent =
+          missingItems.length + ' row' + (missingItems.length !== 1 ? 's' : '') +
+          ' not found in JIRA results — verify and remove if rejected:';
+        var ul2 = document.getElementById('missing-list');
+        missingItems.forEach(function(i) {
+          var li = document.createElement('li');
+          li.textContent = i.key + ' (last status: ' + (i.lastStatus || 'Unknown') + ')';
+          ul2.appendChild(li);
+        });
+      }
+
+      // Unclassified
+      if (unclassified.length > 0) {
+        var us = document.getElementById('unclassified-section');
+        us.style.display = '';
+        us.querySelector('.section-title').textContent =
+          unclassified.length + ' issue' + (unclassified.length !== 1 ? 's' : '') +
+          ' matched no status JQL — status column not updated:';
+        var ul3 = document.getElementById('unclassified-list');
+        unclassified.forEach(function(i) {
+          var li = document.createElement('li');
+          li.textContent = i.key + (i.summary ? ' — ' + i.summary : '');
+          ul3.appendChild(li);
+        });
+      }
+    }
+
+    function updateCount() {
+      var changes = (pending && pending.changes) || [];
+      var checked = changes.filter(function(c) {
+        var cb = document.getElementById('cb_' + c.key);
+        return cb && cb.checked;
+      }).length;
+      document.getElementById('applyBtn').disabled = checked === 0;
+      document.getElementById('applyBtn').textContent =
+        'Apply ' + checked + ' Change' + (checked !== 1 ? 's' : '');
+    }
+
+    function selectAll(state) {
+      var changes = (pending && pending.changes) || [];
+      changes.forEach(function(c) {
+        var cb = document.getElementById('cb_' + c.key);
+        if (cb) cb.checked = state;
+      });
+      updateCount();
+    }
+
+    function apply() {
+      var changes = (pending && pending.changes) || [];
+      var approved = changes
+        .filter(function(c) {
+          var cb = document.getElementById('cb_' + c.key);
+          return cb && cb.checked;
+        })
+        .map(function(c) { return c.key; });
+
+      document.getElementById('applyBtn').disabled = true;
+      document.getElementById('applyBtn').textContent = 'Applying…';
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.error) {
+            alert('Error: ' + result.error);
+            document.getElementById('applyBtn').disabled = false;
+            updateCount();
+          } else {
+            google.script.host.close();
+          }
+        })
+        .withFailureHandler(function(e) {
+          alert('Failed: ' + e.message);
+          document.getElementById('applyBtn').disabled = false;
+          updateCount();
+        })
+        .applyApprovedChanges(approved);
+    }
+
+    function cancel() {
+      google.script.run.cancelApproval();
+      google.script.host.close();
+    }
+
+    // Load pending changes on dialog open
+    google.script.run
+      .withSuccessHandler(renderChanges)
+      .withFailureHandler(function(e) {
+        document.getElementById('loading').textContent = 'Error: ' + e.message;
+      })
+      .getPendingApproval();
+  </script>
+</body>
+</html>
