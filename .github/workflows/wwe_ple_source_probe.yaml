@@ -1,0 +1,29 @@
+name: Probe WWE PLE Sources
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe-sources:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Probe Dependencies
+        run: python -m pip install requests beautifulsoup4
+
+      - name: Probe Official WWE PLE Source Pages
+        run: python wwe-ple-updater/probe_sources.py
