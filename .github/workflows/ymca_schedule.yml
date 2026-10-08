@@ -1,0 +1,49 @@
+name: YMCA Pool Schedule Fetcher & Parser
+
+on:
+  schedule:
+    # Runs at 00:00 UTC every Sunday night / Monday morning
+    - cron: '0 0 * * 0'
+  workflow_dispatch: # Allows manual trigger from GitHub UI
+
+jobs:
+  check-and-update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Allows committing updated .ics back to repo
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests pdfplumber
+
+      - name: Run Schedule Parser Script
+        working-directory: ymca-schedule-updater
+        run: |
+          python parse_schedule.py
+
+      - name: Commit and Push if Changed
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Stage the generated .ics file from the subfolder
+          git add ymca-schedule-updater/maccoll_pool.ics
+          
+          # Check if there are changes compared to previous commit
+          if git diff --staged --quiet; then
+            echo "No changes detected in schedule .ics file."
+          else
+            git commit -m "Automated update: MacColl YMCA Pool Schedule"
+            git push
+            echo "New schedule committed and pushed."
+          fi
