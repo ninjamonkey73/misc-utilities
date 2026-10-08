@@ -1,0 +1,46 @@
+name: Update WWE PLE Calendar Schedule
+
+on:
+  schedule:
+    # Runs every Sunday at 00:00 UTC
+    - cron: "0 0 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-wwe-ics:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests beautifulsoup4
+
+      - name: Run Dynamic WWE Scraper
+        run: |
+          python wwe-ple-updater/parse_wwe_ple.py
+
+      - name: Check for Changes and Commit
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add wwe-ple-updater/wwe_ple_schedule.ics
+
+          if git diff --staged --quiet; then
+            echo "No schedule changes detected."
+          else
+            git commit -m "auto: update wwe_ple_schedule.ics [skip ci]"
+            git push
+          fi
