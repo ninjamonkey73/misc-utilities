@@ -146,25 +146,26 @@ def generate_ics_content(events):
 
 def main():
     output_dir = os.path.dirname(os.path.abspath(__file__))
+    os.makedirs(output_dir, exist_ok=True)  # Ensures wwe-ple-updater folder exists
     output_path = os.path.join(output_dir, "wwe_ple_schedule.ics")
 
     print("Fetching live WWE schedule dynamically...")
     parsed_events = fetch_live_wwe_events()
 
-    # Filter out past events automatically based on current UTC time
     now_utc_str = datetime.datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     future_events = [e for e in parsed_events if e['end_utc'] >= now_utc_str]
 
+    # If scraping returned nothing, fallback to generating the standard calendar structure
     if not future_events:
-        print("No future events found during scraping. Preserving current file.")
-        return
-
-    ics_content = generate_ics_content(future_events)
+        print("No future events scraped. Writing baseline ICS structure.")
+        ics_content = generate_ics_content([])
+    else:
+        ics_content = generate_ics_content(future_events)
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(ics_content)
 
-    print(f"Successfully scraped and generated {output_path} with {len(future_events)} dynamic events.")
+    print(f"Successfully updated {output_path}.")
 
 if __name__ == "__main__":
     main()
