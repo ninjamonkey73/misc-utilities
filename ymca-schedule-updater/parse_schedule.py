@@ -2,18 +2,60 @@ import os
 import re
 import requests
 import pdfplumber
+from bs4 import BeautifulSoup
 from datetime import datetime, date, timedelta
 import calendar
 
-# Target YMCA URL and Location Cookie
 SCHEDULE_PAGE_URL = "https://ymcapawtucket.org/schedules?date={}&locations=&categories=&cn=&inst=&room="
+LOCATION_PAGE_URL = "https://ymcapawtucket.org/locations/maccoll"
 
-# YMCA Cookie for MacColl Branch
 COOKIES = {
     'home_branch': '{"id":"630","dontAsk":true,"lastShowTime":1791463514}'
 }
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+def get_branch_hours():
+    """Scrapes the branch operating hours directly from the MacColl location webpage."""
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+    
+    hours_by_day = {
+        "SU": "YMCA Hours: 7:00 AM - 5:00 PM",
+        "MO": "YMCA Hours: 5:15 AM - 9:00 PM",
+        "TU": "YMCA Hours: 5:15 AM - 9:00 PM",
+        "WE": "YMCA Hours: 5:15 AM - 9:00 PM",
+        "TH": "YMCA Hours: 5:15 AM - 9:00 PM",
+        "FR": "YMCA Hours: 5:15 AM - 9:00 PM",
+        "SA": "YMCA Hours: 7:00 AM - 5:00 PM"
+    }
+
+    try:
+        res = requests.get(LOCATION_PAGE_URL, headers=headers, timeout=10)
+        if res.status_code == 200:
+            soup = BeautifulSoup(res.text, 'html.parser')
+            # Look for table content or hours block text
+            text = soup.get_text()
+
+            # Check Mon - Fri match
+            mf_match = re.search(r'Mon\s*-\s*Fri[^\d]*(\d{1,2}:\d{2}\s*(?:am|pm)\s*-\s*\d{1,2}:\d{2}\s*(?:am|pm))', text, re.I)
+            if mf_match:
+                mf_hours = mf_match.group(1).upper()
+                for day in ["MO", "TU", "WE", "TH", "FR"]:
+                    hours_by_day[day] = f"YMCA Hours: {mf_hours}"
+
+            # Check Sat - Sun match
+            ss_match = re.search(r'Sat\s*-\s*Sun[^\d]*(\d{1,2}:\d{2}\s*(?:am|pm)\s*-\s*\d{1,2}:\d{2}\s*(?:am|pm))', text, re.I)
+            if ss_match:
+                ss_hours = ss_match.group(1).upper()
+                for day in ["SA", "SU"]:
+                    hours_by_day[day] = f"YMCA Hours: {ss_hours}"
+
+    except Exception as e:
+        print(f"Warning: Could not fetch live branch hours from web page ({e}). Using defaults.")
+
+    return hours_by_day
 
 def get_pdf_url():
     """Fetches the schedule page with the MacColl cookie and returns the Pool PDF URL."""
@@ -26,12 +68,10 @@ def get_pdf_url():
     response = requests.get(url, headers=headers, cookies=COOKIES)
     pdf_links = re.findall(r'href=["\'](https?://[^"\']+\.pdf|/[^"\']+\.pdf)["\']', response.text, re.IGNORECASE)
     
-    # Priority filter for pool/aquatic schedules
     for link in pdf_links:
         if re.search(r'pool|aqua|water|indoor', link, re.IGNORECASE):
             return link if link.startswith('http') else "https://ymcapawtucket.org" + link
             
-    # Fallback to first PDF if specific keywords aren't found
     if pdf_links:
         first_link = pdf_links[0]
         return first_link if first_link.startswith('http') else "https://ymcapawtucket.org" + first_link
@@ -47,7 +87,7 @@ def parse_time_to_utc(date_obj, time_str):
     return dt_utc.strftime("%Y%m%dT%H%M%SZ")
 
 def generate_ics_from_pdf(pdf_path, output_ics):
-    """Parses text from the schedule PDF and generates UTC-formatted VEVENT entries."""
+    """Parses text from the schedule PDF and web page hours to generate UTC-formatted VEVENT entries."""
     text_content = []
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
@@ -55,14 +95,12 @@ def generate_ics_from_pdf(pdf_path, output_ics):
 
     full_text = "\n".join(text_content)
 
-    # Detect Month and Year from Header (e.g. OCTOBER 2026)
     header_match = re.search(r'(JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)\s+(\d{4})', full_text, re.IGNORECASE)
     if header_match:
         month_name, year_str = header_match.groups()
         month_num = list(calendar.month_name).index(month_name.capitalize())
         year_num = int(year_str)
     else:
-        # Default fallback to current month/year
         today = date.today()
         month_num, year_num = today.month, today.year
 
@@ -78,19 +116,17 @@ def generate_ics_from_pdf(pdf_path, output_ics):
         "X-WR-CALNAME:MacColl YMCA Pool Schedule"
     ]
 
-    # Map days of the week to their first occurrence date in the target month
     days_map = {"SU": 0, "MO": 1, "TU": 2, "WE": 3, "TH": 4, "FR": 5, "SA": 6}
     first_day_dates = {}
     for day_code, day_index in days_map.items():
         for d in range(1, 8):
             test_date = date(year_num, month_num, d)
-            # Python weekday(): Monday=0, Sunday=6
             py_weekday = (test_date.weekday() + 1) % 7
             if py_weekday == day_index:
                 first_day_dates[day_code] = test_date
                 break
 
-    def add_event(summary, location, day_code, start_time, end_time, description=""):
+    def add_timed_event(summary, location, day_code, start_time, end_time, description=""):
         first_date = first_day_dates[day_code]
         start_utc = parse_time_to_utc(first_date, start_time)
         end_utc = parse_time_to_utc(first_date, end_time)
@@ -108,40 +144,58 @@ def generate_ics_from_pdf(pdf_path, output_ics):
         event_lines.append("END:VEVENT")
         ics_lines.extend(event_lines)
 
-    # --- Hardcoded/Structured Event Rules Matching Standard Layout ---
+    def add_all_day_event(summary, location, day_code):
+        """Adds an all-day event chip (DTSTART/DTEND formatted as YYYYMMDD)."""
+        first_date = first_day_dates[day_code]
+        next_date = first_date + timedelta(days=1)
+        
+        start_str = first_date.strftime("%Y%m%d")
+        end_str = next_date.strftime("%Y%m%d")
+        
+        event_lines = [
+            "BEGIN:VEVENT",
+            f"SUMMARY:{summary}",
+            f"LOCATION:{location}",
+            f"DTSTART;VALUE=DATE:{start_str}",
+            f"DTEND;VALUE=DATE:{end_str}",
+            f"RRULE:FREQ=WEEKLY;UNTIL={until_utc};BYDAY={day_code}",
+            "END:VEVENT"
+        ]
+        ics_lines.extend(event_lines)
+
+    # --- ALL-DAY BRANCH HOURS CHIPS (Scraped from MacColl Page) ---
+    branch_hours = get_branch_hours()
+    for day_code, hours_text in branch_hours.items():
+        add_all_day_event(hours_text, "MacColl YMCA", day_code)
+
+    # --- TIMED POOL SCHEDULE EVENTS ---
+    add_timed_event("Lap Swim (6 Lanes)", "MacColl YMCA - Indoor Pool", "SU", "7:00 AM", "8:00 AM")
     
-    # LAP SWIM - Indoor Pool
-    add_event("Lap Swim (6 Lanes)", "MacColl YMCA - Indoor Pool", "SU", "7:00 AM", "8:00 AM")
-    
-    # Check for early closure notes (e.g. Swim Meet on Oct 4th at 3:45 PM)
     if "Swim Meet" in full_text:
-        add_event("Lap Swim (4 Lanes) - Early Closing 3:45 PM", "MacColl YMCA - Indoor Pool", "SU", "8:00 AM", "12:00 PM")
-        add_event("Lap Swim (4 Lanes)", "MacColl YMCA - Indoor Pool", "SU", "12:00 PM", "3:45 PM", "Note: Lap Lanes closing early at 3:45 PM due to Swim Meet.")
+        add_timed_event("Lap Swim (4 Lanes) - Early Closing 3:45 PM", "MacColl YMCA - Indoor Pool", "SU", "8:00 AM", "12:00 PM")
+        add_timed_event("Lap Swim (4 Lanes)", "MacColl YMCA - Indoor Pool", "SU", "12:00 PM", "3:45 PM", "Note: Lap Lanes closing early at 3:45 PM due to Swim Meet.")
     else:
-        add_event("Lap Swim (4 Lanes)", "MacColl YMCA - Indoor Pool", "SU", "8:00 AM", "12:00 PM")
-        add_event("Lap Swim (4 Lanes)", "MacColl YMCA - Indoor Pool", "SU", "12:00 PM", "4:30 PM")
+        add_timed_event("Lap Swim (4 Lanes)", "MacColl YMCA - Indoor Pool", "SU", "8:00 AM", "12:00 PM")
+        add_timed_event("Lap Swim (4 Lanes)", "MacColl YMCA - Indoor Pool", "SU", "12:00 PM", "4:30 PM")
 
-    # Weekday Lap Swim
     for day in ["MO", "TU", "TH"]:
-        add_event("Lap Swim (6 Lanes)", "MacColl YMCA - Indoor Pool", day, "5:30 AM", "10:30 AM")
-    add_event("Lap Swim (6 Lanes)", "MacColl YMCA - Indoor Pool", "WE", "5:30 AM", "9:45 AM")
-    add_event("Lap Swim (6 Lanes)", "MacColl YMCA - Indoor Pool", "FR", "5:30 AM", "9:30 AM")
-    add_event("Lap Swim (6 Lanes)", "MacColl YMCA - Indoor Pool", "SA", "7:00 AM", "8:00 AM")
+        add_timed_event("Lap Swim (6 Lanes)", "MacColl YMCA - Indoor Pool", day, "5:30 AM", "10:30 AM")
+    add_timed_event("Lap Swim (6 Lanes)", "MacColl YMCA - Indoor Pool", "WE", "5:30 AM", "9:45 AM")
+    add_timed_event("Lap Swim (6 Lanes)", "MacColl YMCA - Indoor Pool", "FR", "5:30 AM", "9:30 AM")
+    add_timed_event("Lap Swim (6 Lanes)", "MacColl YMCA - Indoor Pool", "SA", "7:00 AM", "8:00 AM")
 
-    # Afternoon Lap Swim
     for day in ["MO", "TU"]:
-        add_event("Lap Swim (6 Lanes)", "MacColl YMCA - Indoor Pool", day, "11:30 AM", "4:00 PM")
-    add_event("Lap Swim (6 Lanes)", "MacColl YMCA - Indoor Pool", "WE", "10:30 AM", "4:00 PM")
-    add_event("Lap Swim (6 Lanes)", "MacColl YMCA - Indoor Pool", "TH", "11:15 AM", "4:00 PM")
-    add_event("Lap Swim (6 Lanes)", "MacColl YMCA - Indoor Pool", "FR", "10:15 AM", "4:00 PM")
+        add_timed_event("Lap Swim (6 Lanes)", "MacColl YMCA - Indoor Pool", day, "11:30 AM", "4:00 PM")
+    add_timed_event("Lap Swim (6 Lanes)", "MacColl YMCA - Indoor Pool", "WE", "10:30 AM", "4:00 PM")
+    add_timed_event("Lap Swim (6 Lanes)", "MacColl YMCA - Indoor Pool", "TH", "11:15 AM", "4:00 PM")
+    add_timed_event("Lap Swim (6 Lanes)", "MacColl YMCA - Indoor Pool", "FR", "10:15 AM", "4:00 PM")
 
-    # OPEN SWIM - Activity Pool
-    add_event("Open Swim (Activity Pool)", "MacColl YMCA - Activity Pool", "SU", "7:00 AM", "9:30 AM")
-    add_event("Open Swim w/ Water Slide", "MacColl YMCA - Activity Pool", "SU", "11:00 AM", "4:30 PM")
+    add_timed_event("Open Swim (Activity Pool)", "MacColl YMCA - Activity Pool", "SU", "7:00 AM", "9:30 AM")
+    add_timed_event("Open Swim w/ Water Slide", "MacColl YMCA - Activity Pool", "SU", "11:00 AM", "4:30 PM")
     for day in ["TU", "TH"]:
-        add_event("Open Swim w/ Water Slide", "MacColl YMCA - Activity Pool", day, "4:00 PM", "7:00 PM")
-    add_event("Open Swim w/ Water Slide", "MacColl YMCA - Activity Pool", "FR", "1:00 PM", "8:30 PM")
-    add_event("Open Swim w/ Water Slide", "MacColl YMCA - Activity Pool", "SA", "12:00 PM", "4:30 PM")
+        add_timed_event("Open Swim w/ Water Slide", "MacColl YMCA - Activity Pool", day, "4:00 PM", "7:00 PM")
+    add_timed_event("Open Swim w/ Water Slide", "MacColl YMCA - Activity Pool", "FR", "1:00 PM", "8:30 PM")
+    add_timed_event("Open Swim w/ Water Slide", "MacColl YMCA - Activity Pool", "SA", "12:00 PM", "4:30 PM")
 
     ics_lines.append("END:VCALENDAR")
 
