@@ -30,6 +30,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests beautifulsoup4
 
+      - name: Run Offline Parser Tests
+        run: python -m unittest discover -s wwe-ple-updater -p 'test_*.py'
+
       - name: Run WWE PLE Parser Script
         run: |
           python wwe-ple-updater/parse_wwe_ple.py

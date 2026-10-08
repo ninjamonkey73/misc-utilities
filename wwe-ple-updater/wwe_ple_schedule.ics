@@ -1,6 +1,52 @@
 BEGIN:VCALENDAR
 VERSION:2.0
-PRODID:-//WWE PLE Dynamic Schedule Tracker//EN
+PRODID:-//WWE PLE Schedule 12-Month Update//EN
 CALSCALE:GREGORIAN
 METHOD:PUBLISH
+
+BEGIN:VEVENT
+UID:wwe-mitb-2026@wwe-ple-tracker
+SUMMARY:WWE Money in the Bank 2026
+DTSTART;TZID=America/New_York:20261010T200000
+DTEND;TZID=America/New_York:20261010T235900
+LOCATION:Smoothie King Center, New Orleans, LA
+DESCRIPTION:The annual high-stakes ladder matches for the Men's and Women's briefcases. Live at 8:00 PM ET on ESPN networks.
+END:VEVENT
+
+BEGIN:VEVENT
+UID:wwe-crownjewel-2026@wwe-ple-tracker
+SUMMARY:WWE Crown Jewel 2026
+DTSTART;TZID=America/New_York:20261107T130000
+DTEND;TZID=America/New_York:20261107T170000
+LOCATION:Riyadh Season Stadium, Riyadh, Saudi Arabia
+DESCRIPTION:Crown Jewel Champion vs. Champion matches featuring top RAW and SmackDown titleholders. Matinee broadcast live at 1:00 PM ET on ESPN networks.
+END:VEVENT
+
+BEGIN:VEVENT
+UID:wwe-survivor-series-2026@wwe-ple-tracker
+SUMMARY:WWE Survivor Series: WarGames 2026
+DTSTART;TZID=America/New_York:20261128T200000
+DTEND;TZID=America/New_York:20261128T235900
+LOCATION:Daikin Park, Houston, TX
+DESCRIPTION:The 40th annual Survivor Series featuring double-ring WarGames cage matches. Live at 8:00 PM ET on ESPN networks.
+END:VEVENT
+
+BEGIN:VEVENT
+UID:wwe-wrestlepalooza-2026@wwe-ple-tracker
+SUMMARY:WWE Wrestlepalooza 2026
+DTSTART;TZID=America/New_York:20261212T050000
+DTEND;TZID=America/New_York:20261212T090000
+LOCATION:RAC Arena, Perth, Western Australia
+DESCRIPTION:International stadium special live from Western Australia. Broadcast live at 5:00 AM ET on ESPN networks.
+END:VEVENT
+
+BEGIN:VEVENT
+UID:wwe-royalrumble-2027@wwe-ple-tracker
+SUMMARY:WWE Royal Rumble 2027
+DTSTART;TZID=America/New_York:20270206T200000
+DTEND;TZID=America/New_York:20270206T235900
+LOCATION:State Farm Stadium, Glendale, AZ
+DESCRIPTION:The 40th annual Royal Rumble featuring 30-man and 30-woman Royal Rumble matches for WrestleMania 43 title opportunities.
+END:VEVENT
+
 END:VCALENDAR

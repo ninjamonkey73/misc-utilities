@@ -47,7 +47,7 @@ HEADERS = {
     )
 }
 TIMEOUT_SECONDS = 30
-MAX_DETAIL_PAGES_PER_SOURCE = 20
+MAX_DETAIL_PAGES_PER_SOURCE = 4
 
 
 def fetch_page(name: str, url: str):
@@ -151,10 +151,10 @@ def print_date_time_evidence(soup):
     if not matches:
         print("  (no matching date/time text found)")
         return
-    for snippet in matches[:8]:
+    for snippet in matches[:2]:
         print(f"  ...{snippet}...")
-    if len(matches) > 8:
-        print(f"  ... {len(matches) - 8} more matches omitted")
+    if len(matches) > 2:
+        print(f"  ... {len(matches) - 2} more matches omitted")
 
 
 def probe_detail_page(source_name: str, label: str, url: str) -> bool:

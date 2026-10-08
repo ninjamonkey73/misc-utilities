@@ -1,0 +1,26 @@
+{
+  "aliases": {
+    "money-in-the-bank": "mitb",
+    "mitb": "mitb",
+    "crown-jewel": "crownjewel",
+    "crownjewel": "crownjewel",
+    "survivor-series-wargames": "survivor-series",
+    "survivor-series-war-games": "survivor-series",
+    "survivor-series": "survivor-series",
+    "wwe-wrestlepalooza": "wrestlepalooza",
+    "wrestlepalooza-perth": "wrestlepalooza",
+    "wrestlepalooza": "wrestlepalooza",
+    "royal-rumble": "royalrumble",
+    "royalrumble": "royalrumble"
+  },
+  "nonPlePackageSlugs": [
+    "raw",
+    "wwe-raw",
+    "monday-night-raw",
+    "smackdown",
+    "wwe-smackdown",
+    "friday-night-smackdown",
+    "nxt",
+    "wwe-nxt"
+  ]
+}
