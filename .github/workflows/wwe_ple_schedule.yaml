@@ -36,12 +36,12 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Force add in case directory/file is untracked or in .gitignore
-          git add -f wwe-ple-updater/wwe_ple_schedule.ics || true
+          git add wwe-ple-updater/wwe_ple_schedule.ics
 
           if git diff --staged --quiet; then
             echo "No schedule changes detected."
           else
             git commit -m "auto: update wwe_ple_schedule.ics [skip ci]"
-            git push
+            git pull --rebase origin main
+            git push origin main
           fi
