@@ -1,9 +1,8 @@
-#!/usr,bin/env python3
+#!/usr/bin/env python3
 """
 parse_wwe_ple.py
-Dynamically fetches upcoming WWE Premium Live Events (PLEs) by querying
-Wikipedia's Category API for current and upcoming year events.
-Formats output into standard UTC calendar entries with stable UIDs.
+Dynamically fetches upcoming WWE Premium Live Events (PLEs) from Wikipedia's
+rendered List page, parses dates and venues cleanly, and outputs a populated .ics file.
 """
 
 import os
@@ -17,7 +16,7 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
 
-WIKI_API = "https://en.wikipedia.org/w/api.php"
+WIKI_URL = "https://en.wikipedia.org/wiki/List_of_WWE_pay-per-view_and_WWE_Network_events"
 
 def sanitize_uid(title, start_utc):
     clean_title = re.sub(r'[^a-zA-Z0-9]', '', title.lower())
@@ -25,9 +24,11 @@ def sanitize_uid(title, start_utc):
     return f"wwe-{clean_title}-{date_part}@wwe-ple-tracker"
 
 def parse_date_to_utc(date_str):
-    """Converts parsed dates into ISO 8601 UTC strings."""
+    """Parses date strings like 'October 10, 2026' into ISO 8601 UTC strings."""
     clean_date = re.sub(r'\[.*?\]|\(.*?\)', '', date_str).strip()
     dt = None
+    
+    # Handle single dates
     for fmt in ("%B %d, %Y", "%b %d, %Y", "%Y-%m-%d"):
         try:
             dt = datetime.datetime.strptime(clean_date, fmt)
@@ -35,89 +36,86 @@ def parse_date_to_utc(date_str):
         except ValueError:
             continue
 
+    # Handle multi-day date ranges e.g. "April 18–19, 2026"
     if not dt:
-        # Check for date ranges like 'August 1–2, 2026'
-        m = re.search(r'([A-Z][a-z]+)\s+\d+[\u2013\-]\d+,\s+(\d{4})', clean_date)
+        m = re.search(r'([A-Z][a-z]+)\s+(\d+)\s*[\u2013\-]\s*\d+,\s*(\d{4})', clean_date)
         if m:
             try:
-                dt = datetime.datetime.strptime(f"{m.group(1)} 1, {m.group(2)}", "%B %d, %Y")
+                dt = datetime.datetime.strptime(f"{m.group(1)} {m.group(2)}, {m.group(3)}", "%B %d, %Y")
             except ValueError:
-                return None, None
-        else:
-            return None, None
+                pass
 
-    # Standard 8:00 PM ET start time -> convert to UTC (+4 hrs EDT / +5 hrs EST)
+    if not dt:
+        return None, None
+
+    # Default 8:00 PM ET start time converted to UTC
     dt_utc = dt.replace(hour=20, minute=0, tzinfo=timezone.utc) + timedelta(hours=4)
     start_utc = dt_utc.strftime("%Y%m%dT%H%M%SZ")
     end_utc = (dt_utc + timedelta(hours=4)).strftime("%Y%m%dT%H%M%SZ")
     return start_utc, end_utc
 
-def fetch_events_from_wiki_category(year):
-    """Queries Wikipedia category for events in a given year."""
+def fetch_upcoming_events():
+    """Scrapes the 'Upcoming events' table directly from Wikipedia HTML."""
     events = []
-    params = {
-        "action": "categorymembers",
-        "cmtitle": f"Category:{year}_WWE_pay-per-view_events",
-        "cmlimit": "50",
-        "format": "json"
-    }
-    
     try:
-        res = requests.get(WIKI_API, headers=HEADERS, params=params, timeout=10)
+        res = requests.get(WIKI_URL, headers=HEADERS, timeout=15)
         if res.status_code != 200:
             return events
+
+        soup = BeautifulSoup(res.text, "html.parser")
         
-        pages = res.json().get("query", {}).get("categorymembers", [])
-        for p in pages:
-            page_title = p.get("title", "")
-            if not page_title:
-                continue
+        # Locate all tables on the page
+        tables = soup.find_all("table", class_="wikitable")
+        for table in tables:
+            rows = table.find_all("tr")
+            for row in rows:
+                cols = row.find_all(["td", "th"])
+                if len(cols) >= 3:
+                    row_text = " ".join([c.get_text(" ", strip=True) for c in cols])
+                    
+                    # Match dates in 2026 or 2027
+                    date_match = re.search(r'([A-Z][a-z]+\s+\d+(?:[\u2013\-]\d+)?,\s+202[6-7])', row_text)
+                    if date_match:
+                        raw_date = date_match.group(1)
+                        
+                        # Title is usually in the first or second column link
+                        title = ""
+                        for col in cols[:2]:
+                            a = col.find("a")
+                            if a and a.get_text(strip=True):
+                                title = a.get_text(strip=True)
+                                break
+                            elif col.get_text(strip=True):
+                                title = col.get_text(strip=True)
+                                break
+                        
+                        title = re.sub(r'\[.*?\]', '', title).strip()
+                        if not title or title.lower() in ["event", "date", "name"]:
+                            continue
 
-            # Fetch parsed page infobox to extract exact date & location
-            parse_params = {
-                "action": "parse",
-                "page": page_title,
-                "prop": "text",
-                "format": "json"
-            }
-            p_res = requests.get(WIKI_API, headers=HEADERS, params=parse_params, timeout=10)
-            if p_res.status_code != 200:
-                continue
-            
-            html = p_res.json().get("parse", {}).get("text", {}).get("*", "")
-            soup = BeautifulSoup(html, "html.parser")
-            infobox = soup.find("table", class_=re.compile(r'infobox', re.I))
-            
-            if not infobox:
-                continue
+                        # Extract location/venue column if present
+                        location = "TBA"
+                        if len(cols) >= 4:
+                            location = cols[3].get_text(" ", strip=True)
+                        elif len(cols) >= 3:
+                            location = cols[2].get_text(" ", strip=True)
+                        location = re.sub(r'\[.*?\]', '', location).strip() or "See WWE.com for venue"
 
-            date_val, loc_val = "", "TBA"
-            for tr in infobox.find_all("tr"):
-                th = tr.find("th")
-                td = tr.find("td")
-                if th and td:
-                    label = th.get_text(strip=True).lower()
-                    if label == "date":
-                        date_val = td.get_text(" ", strip=True)
-                    elif label in ["venue", "city", "location"]:
-                        loc_val = td.get_text(" ", strip=True)
-
-            if date_val:
-                start_utc, end_utc = parse_date_to_utc(date_val)
-                if start_utc:
-                    clean_name = re.sub(r'\s*\(\d{4}\)', '', page_title)
-                    uid = sanitize_uid(clean_name, start_utc)
-                    events.append({
-                        "uid": uid,
-                        "summary": f"WWE {clean_name}" if not clean_name.lower().startswith("wwe") else clean_name,
-                        "start_utc": start_utc,
-                        "end_utc": end_utc,
-                        "location": re.sub(r'\[.*?\]', '', loc_val).strip(),
-                        "description": f"Official WWE Event: {clean_name}. Broadcast live on Peacock / ESPN networks."
-                    })
-
+                        start_utc, end_utc = parse_date_to_utc(raw_date)
+                        if start_utc:
+                            clean_title = f"WWE {title}" if not title.lower().startswith("wwe") else title
+                            uid = sanitize_uid(title, start_utc)
+                            
+                            events.append({
+                                "uid": uid,
+                                "summary": clean_title,
+                                "start_utc": start_utc,
+                                "end_utc": end_utc,
+                                "location": location,
+                                "description": f"Official WWE Event: {title}. Broadcast live on Peacock / ESPN networks."
+                            })
     except Exception as err:
-        print(f"Error scraping category {year}: {err}")
+        print(f"Scraper error: {err}")
 
     return events
 
@@ -146,12 +144,7 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, "wwe_ple_schedule.ics")
 
-    current_year = datetime.datetime.now(timezone.utc).year
-    parsed_events = []
-    
-    # Check current year and next year categories
-    for year in [current_year, current_year + 1]:
-        parsed_events.extend(fetch_events_from_wiki_category(year))
+    parsed_events = fetch_upcoming_events()
 
     # Deduplicate by UID
     unique = {e['uid']: e for e in parsed_events}
