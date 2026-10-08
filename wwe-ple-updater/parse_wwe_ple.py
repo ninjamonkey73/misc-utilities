@@ -2,7 +2,8 @@
 """
 parse_wwe_ple.py
 Dynamically fetches upcoming WWE Premium Live Events (PLEs) from Wikipedia's
-rendered List page, parses dates and venues cleanly, and outputs a populated .ics file.
+rendered schedule tables, converts dates to standard UTC (YYYYMMDDTHHMMSSZ),
+and outputs a populated .ics calendar file with stable UIDs.
 """
 
 import os
@@ -28,7 +29,7 @@ def parse_date_to_utc(date_str):
     clean_date = re.sub(r'\[.*?\]|\(.*?\)', '', date_str).strip()
     dt = None
     
-    # Handle single dates
+    # Handle standard single dates
     for fmt in ("%B %d, %Y", "%b %d, %Y", "%Y-%m-%d"):
         try:
             dt = datetime.datetime.strptime(clean_date, fmt)
@@ -48,14 +49,14 @@ def parse_date_to_utc(date_str):
     if not dt:
         return None, None
 
-    # Default 8:00 PM ET start time converted to UTC
+    # Default 8:00 PM ET start time -> convert to UTC (+4 hrs EDT / +5 hrs EST)
     dt_utc = dt.replace(hour=20, minute=0, tzinfo=timezone.utc) + timedelta(hours=4)
     start_utc = dt_utc.strftime("%Y%m%dT%H%M%SZ")
     end_utc = (dt_utc + timedelta(hours=4)).strftime("%Y%m%dT%H%M%SZ")
     return start_utc, end_utc
 
 def fetch_upcoming_events():
-    """Scrapes the 'Upcoming events' table directly from Wikipedia HTML."""
+    """Scrapes upcoming event rows from Wikipedia's schedule tables."""
     events = []
     try:
         res = requests.get(WIKI_URL, headers=HEADERS, timeout=15)
@@ -63,9 +64,8 @@ def fetch_upcoming_events():
             return events
 
         soup = BeautifulSoup(res.text, "html.parser")
-        
-        # Locate all tables on the page
         tables = soup.find_all("table", class_="wikitable")
+        
         for table in tables:
             rows = table.find_all("tr")
             for row in rows:
@@ -78,7 +78,7 @@ def fetch_upcoming_events():
                     if date_match:
                         raw_date = date_match.group(1)
                         
-                        # Title is usually in the first or second column link
+                        # Extract title from table columns
                         title = ""
                         for col in cols[:2]:
                             a = col.find("a")
@@ -93,7 +93,7 @@ def fetch_upcoming_events():
                         if not title or title.lower() in ["event", "date", "name"]:
                             continue
 
-                        # Extract location/venue column if present
+                        # Extract location
                         location = "TBA"
                         if len(cols) >= 4:
                             location = cols[3].get_text(" ", strip=True)
@@ -112,7 +112,7 @@ def fetch_upcoming_events():
                                 "start_utc": start_utc,
                                 "end_utc": end_utc,
                                 "location": location,
-                                "description": f"Official WWE Event: {title}. Broadcast live on Peacock / ESPN networks."
+                                "description": f"Official WWE Event: {title}. Broadcast live on ESPN networks / Peacock."
                             })
     except Exception as err:
         print(f"Scraper error: {err}")
@@ -154,12 +154,12 @@ def main():
     now_utc_str = datetime.datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     future_events = [e for e in all_events if e['end_utc'] >= now_utc_str]
 
-    ics_content = generate_ics_content(future_events)
+    ics_content = generate_ics_content(future_events if future_events else all_events)
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(ics_content)
 
-    print(f"Successfully generated {output_path} with {len(future_events)} events.")
+    print(f"Successfully generated {output_path} with {len(future_events or all_events)} events.")
 
 if __name__ == "__main__":
     main()
