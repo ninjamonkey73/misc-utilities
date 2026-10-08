@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Fetch full history so rebase can resolve remote commits
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -27,7 +29,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests beautifulsoup4
 
-      - name: Run Dynamic WWE Scraper
+      - name: Run WWE PLE Parser Script
         run: |
           python wwe-ple-updater/parse_wwe_ple.py
 
@@ -39,7 +41,7 @@ jobs:
           git add wwe-ple-updater/wwe_ple_schedule.ics
 
           if git diff --staged --quiet; then
-            echo "No schedule changes detected."
+            echo "No changes detected in wwe_ple_schedule.ics."
           else
             git commit -m "auto: update wwe_ple_schedule.ics [skip ci]"
             git pull --rebase origin main
