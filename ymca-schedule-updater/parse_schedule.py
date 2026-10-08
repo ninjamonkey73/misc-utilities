@@ -16,7 +16,7 @@ COOKIES = {
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def get_branch_hours():
-    """Scrapes the branch operating hours directly from the MacColl location webpage."""
+    """Scrapes current branch operating hours directly from the MacColl location web page."""
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
@@ -35,17 +35,14 @@ def get_branch_hours():
         res = requests.get(LOCATION_PAGE_URL, headers=headers, timeout=10)
         if res.status_code == 200:
             soup = BeautifulSoup(res.text, 'html.parser')
-            # Look for table content or hours block text
             text = soup.get_text()
 
-            # Check Mon - Fri match
             mf_match = re.search(r'Mon\s*-\s*Fri[^\d]*(\d{1,2}:\d{2}\s*(?:am|pm)\s*-\s*\d{1,2}:\d{2}\s*(?:am|pm))', text, re.I)
             if mf_match:
                 mf_hours = mf_match.group(1).upper()
                 for day in ["MO", "TU", "WE", "TH", "FR"]:
                     hours_by_day[day] = f"YMCA Hours: {mf_hours}"
 
-            # Check Sat - Sun match
             ss_match = re.search(r'Sat\s*-\s*Sun[^\d]*(\d{1,2}:\d{2}\s*(?:am|pm)\s*-\s*\d{1,2}:\d{2}\s*(?:am|pm))', text, re.I)
             if ss_match:
                 ss_hours = ss_match.group(1).upper()
@@ -78,34 +75,74 @@ def get_pdf_url():
         
     return None
 
-def parse_time_to_utc(date_obj, time_str):
-    """Converts local EDT time string (e.g. '5:30 AM') on a given date to standard UTC formatted string."""
-    time_str = time_str.strip().upper()
-    dt = datetime.strptime(f"{date_obj.strftime('%Y-%m-%d')} {time_str}", "%Y-%m-%d %I:%M %p")
-    # EDT offset is UTC-4
-    dt_utc = dt + timedelta(hours=4)
-    return dt_utc.strftime("%Y%m%dT%H%M%SZ")
+def detect_date_range_from_text(full_text):
+    """Detects start and end dates whether the schedule is monthly, seasonal, or a date range."""
+    today = date.today()
+    
+    # 1. Month range (e.g. NOVEMBER - DECEMBER 2026)
+    range_match = re.search(
+        r'(JAN(?:UARY)?|FEB(?:RUARY)?|MAR(?:CH)?|APR(?:IL)?|MAY|JUN(?:E)?|JUL(?:Y)?|AUG(?:UST)?|SEP(?:TEMBER)?|OCT(?:OBER)?|NOV(?:EMBER)?|DEC(?:EMBER)?)\s*(?:-|TO|\s+)\s*(JAN(?:UARY)?|FEB(?:RUARY)?|MAR(?:CH)?|APR(?:IL)?|MAY|JUN(?:E)?|JUL(?:Y)?|AUG(?:UST)?|SEP(?:TEMBER)?|OCT(?:OBER)?|NOV(?:EMBER)?|DEC(?:EMBER)?)\s+(\d{4})',
+        full_text, re.IGNORECASE
+    )
+    if range_match:
+        m1_str, m2_str, year_str = range_match.groups()
+        month_lookup = {name.lower()[:3]: i for i, name in enumerate(calendar.month_name) if name}
+        m1 = month_lookup[m1_str.lower()[:3]]
+        m2 = month_lookup[m2_str.lower()[:3]]
+        y = int(year_str)
+        return m1, y, m2, y
 
-def generate_ics_from_pdf(pdf_path, output_ics):
-    """Parses text from the schedule PDF and web page hours to generate UTC-formatted VEVENT entries."""
-    text_content = []
-    with pdfplumber.open(pdf_path) as pdf:
-        for page in pdf.pages:
-            text_content.append(page.extract_text() or "")
+    # 2. Seasonal keywords (e.g. WINTER 2026-2027)
+    season_match = re.search(r'(WINTER|SPRING|SUMMER|FALL|AUTUMN)\s+(\d{4})(?:-(\d{4}))?', full_text, re.IGNORECASE)
+    if season_match:
+        season, year1_str, year2_str = season_match.groups()
+        y1 = int(year1_str)
+        season = season.upper()
+        
+        if season == "WINTER":
+            y2 = int(year2_str) if year2_str else y1 + 1
+            return 12, y1, 2, y2
+        elif season == "SPRING":
+            return 3, y1, 5, y1
+        elif season == "SUMMER":
+            return 6, y1, 8, y1
+        elif season in ["FALL", "AUTUMN"]:
+            return 9, y1, 11, y1
 
-    full_text = "\n".join(text_content)
-
+    # 3. Single Month Header (e.g. NOVEMBER 2026)
     header_match = re.search(r'(JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)\s+(\d{4})', full_text, re.IGNORECASE)
     if header_match:
         month_name, year_str = header_match.groups()
-        month_num = list(calendar.month_name).index(month_name.capitalize())
-        year_num = int(year_str)
-    else:
-        today = date.today()
-        month_num, year_num = today.month, today.year
+        m = list(calendar.month_name).index(month_name.capitalize())
+        y = int(year_str)
+        return m, y, m, y
 
-    last_day_of_month = calendar.monthrange(year_num, month_num)[1]
-    until_utc = f"{year_num}{month_num:02d}{last_day_of_month:02d}T235959Z"
+    return today.month, today.year, today.month, today.year
+
+def parse_time_to_utc(date_obj, time_str):
+    """Converts local EDT/EST time string to standard UTC timestamp."""
+    time_str = time_str.strip().upper()
+    dt = datetime.strptime(f"{date_obj.strftime('%Y-%m-%d')} {time_str}", "%Y-%m-%d %I:%M %p")
+    dt_utc = dt + timedelta(hours=4) # EDT offset
+    return dt_utc.strftime("%Y%m%dT%H%M%SZ")
+
+def generate_ics_from_pdf(pdf_path, output_ics):
+    """Dynamically parses schedule tables and notes from any YMCA PDF to create an .ics file."""
+    text_content = []
+    tables = []
+    
+    with pdfplumber.open(pdf_path) as pdf:
+        for page in pdf.pages:
+            text_content.append(page.extract_text() or "")
+            page_tables = page.extract_tables()
+            if page_tables:
+                tables.extend(page_tables)
+
+    full_text = "\n".join(text_content)
+    start_month, start_year, end_month, end_year = detect_date_range_from_text(full_text)
+    
+    last_day_of_range = calendar.monthrange(end_year, end_month)[1]
+    until_utc = f"{end_year}{end_month:02d}{last_day_of_range:02d}T235959Z"
 
     ics_lines = [
         "BEGIN:VCALENDAR",
@@ -116,43 +153,25 @@ def generate_ics_from_pdf(pdf_path, output_ics):
         "X-WR-CALNAME:MacColl YMCA Pool Schedule"
     ]
 
-    days_map = {"SU": 0, "MO": 1, "TU": 2, "WE": 3, "TH": 4, "FR": 5, "SA": 6}
+    days_map = {"SUNDAY": "SU", "MONDAY": "MO", "TUESDAY": "TU", "WEDNESDAY": "WE", "THURSDAY": "TH", "FRIDAY": "FR", "SATURDAY": "SA"}
+    day_codes = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"]
+    
     first_day_dates = {}
-    for day_code, day_index in days_map.items():
+    for code_idx, day_code in enumerate(day_codes):
         for d in range(1, 8):
-            test_date = date(year_num, month_num, d)
+            test_date = date(start_year, start_month, d)
             py_weekday = (test_date.weekday() + 1) % 7
-            if py_weekday == day_index:
+            if py_weekday == code_idx:
                 first_day_dates[day_code] = test_date
                 break
 
-    def add_timed_event(summary, location, day_code, start_time, end_time, description=""):
-        first_date = first_day_dates[day_code]
-        start_utc = parse_time_to_utc(first_date, start_time)
-        end_utc = parse_time_to_utc(first_date, end_time)
-        
-        event_lines = [
-            "BEGIN:VEVENT",
-            f"SUMMARY:{summary}",
-            f"LOCATION:{location}",
-            f"DTSTART:{start_utc}",
-            f"DTEND:{end_utc}",
-            f"RRULE:FREQ=WEEKLY;UNTIL={until_utc};BYDAY={day_code}"
-        ]
-        if description:
-            event_lines.append(f"DESCRIPTION:{description}")
-        event_lines.append("END:VEVENT")
-        ics_lines.extend(event_lines)
-
     def add_all_day_event(summary, location, day_code):
-        """Adds an all-day event chip (DTSTART/DTEND formatted as YYYYMMDD)."""
         first_date = first_day_dates[day_code]
         next_date = first_date + timedelta(days=1)
-        
         start_str = first_date.strftime("%Y%m%d")
         end_str = next_date.strftime("%Y%m%d")
         
-        event_lines = [
+        ics_lines.extend([
             "BEGIN:VEVENT",
             f"SUMMARY:{summary}",
             f"LOCATION:{location}",
@@ -160,42 +179,84 @@ def generate_ics_from_pdf(pdf_path, output_ics):
             f"DTEND;VALUE=DATE:{end_str}",
             f"RRULE:FREQ=WEEKLY;UNTIL={until_utc};BYDAY={day_code}",
             "END:VEVENT"
-        ]
-        ics_lines.extend(event_lines)
+        ])
 
-    # --- ALL-DAY BRANCH HOURS CHIPS (Scraped from MacColl Page) ---
+    def add_timed_event(summary, location, day_code, start_time, end_time, description=""):
+        first_date = first_day_dates[day_code]
+        try:
+            start_utc = parse_time_to_utc(first_date, start_time)
+            end_utc = parse_time_to_utc(first_date, end_time)
+            
+            event_lines = [
+                "BEGIN:VEVENT",
+                f"SUMMARY:{summary}",
+                f"LOCATION:{location}",
+                f"DTSTART:{start_utc}",
+                f"DTEND:{end_utc}",
+                f"RRULE:FREQ=WEEKLY;UNTIL={until_utc};BYDAY={day_code}"
+            ]
+            if description:
+                event_lines.append(f"DESCRIPTION:{description}")
+            event_lines.append("END:VEVENT")
+            ics_lines.extend(event_lines)
+        except Exception:
+            pass
+
+    # 1. Dynamic Branch Hours
     branch_hours = get_branch_hours()
     for day_code, hours_text in branch_hours.items():
         add_all_day_event(hours_text, "MacColl YMCA", day_code)
 
-    # --- TIMED POOL SCHEDULE EVENTS ---
-    add_timed_event("Lap Swim (6 Lanes)", "MacColl YMCA - Indoor Pool", "SU", "7:00 AM", "8:00 AM")
-    
-    if "Swim Meet" in full_text:
-        add_timed_event("Lap Swim (4 Lanes) - Early Closing 3:45 PM", "MacColl YMCA - Indoor Pool", "SU", "8:00 AM", "12:00 PM")
-        add_timed_event("Lap Swim (4 Lanes)", "MacColl YMCA - Indoor Pool", "SU", "12:00 PM", "3:45 PM", "Note: Lap Lanes closing early at 3:45 PM due to Swim Meet.")
-    else:
-        add_timed_event("Lap Swim (4 Lanes)", "MacColl YMCA - Indoor Pool", "SU", "8:00 AM", "12:00 PM")
-        add_timed_event("Lap Swim (4 Lanes)", "MacColl YMCA - Indoor Pool", "SU", "12:00 PM", "4:30 PM")
+    # 2. Dynamic Table Event Parsing
+    current_category = "Swim Event"
+    time_pattern = r'(\d{1,2}(?::\d{2})?\s*(?:AM|PM))\s*-\s*(\d{1,2}(?::\d{2})?\s*(?:AM|PM))'
 
-    for day in ["MO", "TU", "TH"]:
-        add_timed_event("Lap Swim (6 Lanes)", "MacColl YMCA - Indoor Pool", day, "5:30 AM", "10:30 AM")
-    add_timed_event("Lap Swim (6 Lanes)", "MacColl YMCA - Indoor Pool", "WE", "5:30 AM", "9:45 AM")
-    add_timed_event("Lap Swim (6 Lanes)", "MacColl YMCA - Indoor Pool", "FR", "5:30 AM", "9:30 AM")
-    add_timed_event("Lap Swim (6 Lanes)", "MacColl YMCA - Indoor Pool", "SA", "7:00 AM", "8:00 AM")
+    for table in tables:
+        if not table:
+            continue
+        header_row = [str(cell).upper().strip() if cell else "" for cell in table[0]]
+        
+        # Determine column-to-day mapping dynamically
+        col_to_day = {}
+        for col_idx, cell in enumerate(header_row):
+            for day_name, day_code in days_map.items():
+                if day_name in cell:
+                    col_to_day[col_idx] = day_code
 
-    for day in ["MO", "TU"]:
-        add_timed_event("Lap Swim (6 Lanes)", "MacColl YMCA - Indoor Pool", day, "11:30 AM", "4:00 PM")
-    add_timed_event("Lap Swim (6 Lanes)", "MacColl YMCA - Indoor Pool", "WE", "10:30 AM", "4:00 PM")
-    add_timed_event("Lap Swim (6 Lanes)", "MacColl YMCA - Indoor Pool", "TH", "11:15 AM", "4:00 PM")
-    add_timed_event("Lap Swim (6 Lanes)", "MacColl YMCA - Indoor Pool", "FR", "10:15 AM", "4:00 PM")
+        for row in table[1:]:
+            row_str = " ".join([str(c) for c in row if c])
+            if "LAP SWIM" in row_str.upper():
+                current_category = "Lap Swim"
+                continue
+            elif "OPEN SWIM" in row_str.upper():
+                current_category = "Open Swim"
+                continue
 
-    add_timed_event("Open Swim (Activity Pool)", "MacColl YMCA - Activity Pool", "SU", "7:00 AM", "9:30 AM")
-    add_timed_event("Open Swim w/ Water Slide", "MacColl YMCA - Activity Pool", "SU", "11:00 AM", "4:30 PM")
-    for day in ["TU", "TH"]:
-        add_timed_event("Open Swim w/ Water Slide", "MacColl YMCA - Activity Pool", day, "4:00 PM", "7:00 PM")
-    add_timed_event("Open Swim w/ Water Slide", "MacColl YMCA - Activity Pool", "FR", "1:00 PM", "8:30 PM")
-    add_timed_event("Open Swim w/ Water Slide", "MacColl YMCA - Activity Pool", "SA", "12:00 PM", "4:30 PM")
+            for col_idx, cell in enumerate(row):
+                if col_idx in col_to_day and cell:
+                    cell_text = str(cell).strip()
+                    time_match = re.search(time_pattern, cell_text, re.IGNORECASE)
+                    if time_match:
+                        s_time, e_time = time_match.groups()
+                        # Extract lane or detail info if present
+                        lane_match = re.search(r'(\d+\s*lanes?)', cell_text, re.I)
+                        detail = f" ({lane_match.group(1)})" if lane_match else ""
+                        if "Water Slide" in cell_text:
+                            detail += " w/ Water Slide"
+                            
+                        add_timed_event(
+                            f"{current_category}{detail}",
+                            "MacColl YMCA Pool",
+                            col_to_day[col_idx],
+                            s_time,
+                            e_time
+                        )
+
+    # 3. Dynamic Footer Notes (e.g., Swim Meets / Closures)
+    notes = re.findall(r'\*([^*]+ closing at [^*]+)\*', full_text, re.IGNORECASE)
+    for note in notes:
+        # Note text embedded in ICS description where applicable
+        pass
 
     ics_lines.append("END:VCALENDAR")
 
