@@ -1,30 +1,31 @@
 #!/usr/bin/env python3
 """
 parse_wwe_ple.py
-Dynamically fetches upcoming WWE Premium Live Events (PLEs) from public web endpoints,
-converts timestamps to standard UTC strings (YYYYMMDDTHHMMSSZ),
-and generates a populated .ics file with persistent UIDs.
+Dynamically fetches and parses upcoming WWE Premium Live Events (PLEs)
+from Wikipedia's HTML API, converts dates to standard UTC, and outputs
+a populated .ics calendar file. Zero hardcoded events.
 """
 
 import os
 import re
-import json
 import datetime
 from datetime import timezone, timedelta
 import requests
+from bs4 import BeautifulSoup
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
 
-# Key phrases identifying PLEs / major supercards
-PLE_KEYWORDS = [
-    "royal rumble", "elimination chamber", "wrestlemania", "backlash",
-    "night of champions", "money in the bank", "summerslam", "bash in berlin",
-    "bad blood", "crown jewel", "survivor series", "wargames", "wrestlepalooza",
-    "worlds collide", "saturday night's main event", "stand & deliver",
-    "halloween havoc", "deadline", "vengeance day", "great american bash"
-]
+# Source URL: Wikipedia Action API rendering parsed HTML for WWE PPV/PLE list
+WIKI_API_URL = "https://en.wikipedia.org/w/api.php"
+WIKI_PARAMS = {
+    "action": "parse",
+    "page": "List_of_WWE_pay-per-view_and_WWE_Network_events",
+    "prop": "text",
+    "section": "0",  # Lead section / overview or full parse
+    "format": "json"
+}
 
 def sanitize_uid(title, start_utc):
     """Generates a stable, persistent UID derived from the title slug and UTC start date."""
@@ -34,78 +35,94 @@ def sanitize_uid(title, start_utc):
 
 def parse_date_to_utc(date_str, time_str="20:00"):
     """
-    Parses common event date strings into ISO 8601 UTC strings (YYYYMMDDTHHMMSSZ).
-    Assumes standard ET broadcast times for WWE PLEs unless specified.
+    Parses common event date strings (e.g., 'October 10, 2026') into ISO 8601 UTC strings.
+    Assumes standard 8:00 PM ET start time for WWE PLEs unless specified.
     """
     dt = None
-    for fmt in ("%Y-%m-%d", "%b %d, %Y", "%B %d, %Y", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%SZ"):
+    # Clean up wiki citation references like [12] or trailing characters
+    clean_date_str = re.sub(r'\[.*?\]', '', date_str).strip()
+    
+    for fmt in ("%B %d, %Y", "%b %d, %Y", "%Y-%m-%d"):
         try:
-            dt = datetime.datetime.strptime(date_str.split('.')[0], fmt)
+            dt = datetime.datetime.strptime(clean_date_str, fmt)
             break
         except ValueError:
             continue
 
     if not dt:
-        dt = datetime.datetime.now(timezone.utc)
+        return None, None
 
-    if dt.tzinfo is None:
-        hour, minute = map(int, time_str.split(":"))
-        dt = dt.replace(hour=hour, minute=minute, tzinfo=timezone.utc) + timedelta(hours=4)
+    # Apply 8:00 PM ET default start time -> convert to UTC (+4 hours EDT / +5 hours EST)
+    hour, minute = map(int, time_str.split(":"))
+    dt_local = dt.replace(hour=hour, minute=minute, tzinfo=timezone.utc) + timedelta(hours=4)
 
-    start_utc = dt.strftime("%Y%m%dT%H%M%SZ")
-    end_utc = (dt + timedelta(hours=4)).strftime("%Y%m%dT%H%M%SZ")
+    start_utc = dt_local.strftime("%Y%m%dT%H%M%SZ")
+    end_utc = (dt_local + timedelta(hours=4)).strftime("%Y%m%dT%H%M%SZ")
     return start_utc, end_utc
 
-def fetch_wikipedia_ple_events():
-    """
-    Fetches upcoming WWE PLEs from Wikipedia's structured API.
-    Wikipedia maintains an updated table of scheduled WWE events.
-    """
+def fetch_dynamic_wwe_events():
+    """Scrapes upcoming event rows from Wikipedia's HTML table parser."""
     events = []
-    url = "https://en.wikipedia.org/w/api.php"
-    params = {
-        "action": "parse",
-        "page": "List_of_WWE_pay-per-view_and_WWE_Network_events",
-        "prop": "wikitext",
-        "format": "json"
-    }
-
+    
     try:
-        res = requests.get(url, headers=HEADERS, params=params, timeout=10)
-        if res.status_code == 200:
-            data = res.json()
-            wikitext = data.get("parse", {}).get("wikitext", {}).get("*", "")
-            
-            # Parse table rows for upcoming events
-            rows = re.findall(r'\|-\s*\n(.*?\n)(?=\|-|\=\=)', wikitext, re.DOTALL)
+        # Fetch entire parsed HTML text from Wikipedia API
+        res = requests.get(WIKI_API_URL, headers=HEADERS, params={"action": "parse", "page": "List_of_WWE_pay-per-view_and_WWE_Network_events", "prop": "text", "format": "json"}, timeout=15)
+        if res.status_code != 200:
+            print(f"Error fetching Wikipedia page: HTTP {res.status_code}")
+            return events
+
+        data = res.json()
+        html_content = data.get("parse", {}).get("text", {}).get("*", "")
+        soup = BeautifulSoup(html_content, "html.parser")
+
+        # Locate all wikitables on the page
+        tables = soup.find_all("table", class_="wikitable")
+        
+        for table in tables:
+            rows = table.find_all("tr")
             for row in rows:
-                if any(kw in row.lower() for kw in PLE_KEYWORDS):
-                    # Extract Event Title
-                    title_match = re.search(r'\[\[(?:[^\|\]]*\|)?([^\]]+)\]\]', row)
-                    title = title_match.group(1) if title_match else None
+                cols = row.find_all(["td", "th"])
+                if len(cols) >= 3:
+                    row_text = row.get_text(" ", strip=True)
                     
-                    # Extract Date
-                    date_match = re.search(r'([A-Z][a-z]+\s+\d{1,2},\s+20\d{2})', row)
-                    
-                    # Extract Location / Venue
-                    loc_match = re.search(r'\||\s*([A-Za-z0-9\s,\.\-]+(?:Arena|Center|Stadium|Dome|Park|Hall)[^\|\n]*)', row)
-                    location = loc_match.group(1).strip() if loc_match else "See WWE.com for venue"
-
-                    if title and date_match:
+                    # Look for date patterns e.g. "October 10, 2026" or "November 28, 2026"
+                    date_match = re.search(r'([A-Z][a-z]+\s+\d{1,2},\s+20\d{2})', row_text)
+                    if date_match:
                         raw_date = date_match.group(1)
-                        start_utc, end_utc = parse_date_to_utc(raw_date)
-                        uid = sanitize_uid(title, start_utc)
+                        
+                        # Extract event title from anchor tag or first text cell
+                        title_cell = cols[0].get_text(strip=True) if len(cols) > 0 else ""
+                        title_anchor = cols[0].find("a") if len(cols) > 0 else None
+                        title = title_anchor.get_text(strip=True) if title_anchor else title_cell
+                        
+                        # Clean up title formatting
+                        title = re.sub(r'\[.*?\]', '', title).strip()
+                        if not title or title.lower() in ["event", "date", "name"]:
+                            continue
 
-                        events.append({
-                            "uid": uid,
-                            "summary": f"WWE {title}",
-                            "start_utc": start_utc,
-                            "end_utc": end_utc,
-                            "location": location,
-                            "description": f"Official WWE Event: {title}. Broadcast live on ESPN networks / Peacock."
-                        })
+                        # Extract location/venue if present in subsequent columns
+                        location = "TBA"
+                        if len(cols) >= 3:
+                            loc_text = cols[2].get_text(strip=True)
+                            location = re.sub(r'\[.*?\]', '', loc_text).strip() or "See WWE.com for venue"
+
+                        start_utc, end_utc = parse_date_to_utc(raw_date)
+                        if start_utc and end_utc:
+                            uid = sanitize_uid(title, start_utc)
+                            
+                            # Avoid duplicates
+                            if not any(e["uid"] == uid for e in events):
+                                events.append({
+                                    "uid": uid,
+                                    "summary": f"WWE {title}" if not title.lower().startswith("wwe") else title,
+                                    "start_utc": start_utc,
+                                    "end_utc": end_utc,
+                                    "location": location,
+                                    "description": f"Official WWE Event: {title}. Broadcast live on Peacock / ESPN networks."
+                                })
+
     except Exception as err:
-        print(f"Error fetching from Wikipedia API: {err}")
+        print(f"Dynamic fetch error: {err}")
 
     return events
 
@@ -137,27 +154,19 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, "wwe_ple_schedule.ics")
 
-    print("Fetching live WWE schedule dynamically via API...")
-    parsed_events = fetch_wikipedia_ple_events()
-
-    # Deduplicate events by UID
-    unique_events = {}
-    for e in parsed_events:
-        unique_events[e["uid"]] = e
-    final_events = list(unique_events.values())
+    print("Executing dynamic web scraper (Wikipedia HTML API)...")
+    parsed_events = fetch_dynamic_wwe_events()
 
     # Filter out past events automatically based on current UTC time
     now_utc_str = datetime.datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    future_events = [e for e in final_events if e['end_utc'] >= now_utc_str]
+    future_events = [e for e in parsed_events if e['end_utc'] >= now_utc_str]
 
-    display_events = future_events if future_events else final_events
-
-    ics_content = generate_ics_content(display_events)
+    ics_content = generate_ics_content(future_events)
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(ics_content)
 
-    print(f"Successfully generated {output_path} with {len(display_events)} events.")
+    print(f"Successfully scraped and generated {output_path} with {len(future_events)} future events.")
 
 if __name__ == "__main__":
     main()
