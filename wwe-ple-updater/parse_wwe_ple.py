@@ -507,13 +507,13 @@ def discover_events(output_path):
         }
         print(f"Accepted {summary}: {event_date.isoformat()} {broadcast_time[0]:02d}:{broadcast_time[1]:02d} ET; {location}")
 
-    if parseable_count == 0:
-        raise RuntimeError("No complete event dates were parsed; leaving the existing ICS unchanged.")
+    if parseable_count == 0 and not existing_events:
+        raise RuntimeError("No complete event dates were parsed and no existing calendar entries are available.")
     if unresolved_new_packages:
         names = ", ".join(sorted(set(unresolved_new_packages)))
-        raise RuntimeError(
-            f"New On Location packages lack retrievable full event dates ({names}); "
-            "leaving the existing ICS unchanged."
+        print(
+            f"WARNING: skipping new packages without retrievable full event dates ({names}); "
+            "retaining existing calendar entries."
         )
 
     # Keep prior future entries when a listing temporarily omits a package or only

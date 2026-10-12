@@ -1,8 +1,13 @@
 """Offline unit tests for WWE PLE identity and source-text parsing."""
 
 import importlib.util
+import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 MODULE_PATH = Path(__file__).with_name("parse_wwe_ple.py")
 SPEC = importlib.util.spec_from_file_location("wwe_ple_parser", MODULE_PATH)
@@ -87,6 +92,54 @@ class WWEEventParsingTests(unittest.TestCase):
         )
         self.assertIn("DTSTART;TZID=America/New_York:20261010T200000", content)
         self.assertIn("UID:wwe-mitb-2026@wwe-ple-tracker", content)
+
+
+class WWEEventDiscoveryTests(unittest.TestCase):
+    def test_undated_new_package_is_skipped_and_existing_future_event_is_retained(self):
+        existing_start = parser.datetime(2099, 2, 6, 20, 0, tzinfo=parser.ET)
+        existing_event = {
+            "uid": "wwe-royalrumble-2099@wwe-ple-tracker",
+            "key": "royalrumble",
+            "summary": "WWE Royal Rumble 2099",
+            "start": existing_start,
+            "end": existing_start + parser.timedelta(hours=4),
+            "location": "Existing Stadium, Phoenix, AZ",
+            "description": "Previously recorded event.",
+        }
+        listing_soup = parser.BeautifulSoup(
+            '<a href="https://onlocationexp.com/wwe/new-ple-tickets">New PLE tickets</a>',
+            "html.parser",
+        )
+        package_soup = parser.BeautifulSoup(
+            "New PLE February 2099 | Phoenix, AZ",
+            "html.parser",
+        )
+
+        def fake_fetch(url):
+            if url == parser.ONLOCATION_URL:
+                return SimpleNamespace(url=parser.ONLOCATION_URL), listing_soup
+            return SimpleNamespace(url=url), package_soup
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            output_path = Path(temporary_directory) / "schedule.ics"
+            output_path.write_text(
+                parser.generate_ics_content([existing_event]),
+                encoding="utf-8",
+            )
+            output = StringIO()
+            with patch.object(parser, "fetch", side_effect=fake_fetch), patch.object(
+                parser,
+                "find_supplemental_links",
+                return_value={"new-ple": []},
+            ), redirect_stdout(output):
+                events = parser.discover_events(output_path)
+
+        self.assertEqual([event["uid"] for event in events], [existing_event["uid"]])
+        self.assertEqual(events[0]["start"], existing_start)
+        self.assertIn(
+            "skipping new packages without retrievable full event dates (new-ple)",
+            output.getvalue(),
+        )
 
 
 if __name__ == "__main__":
