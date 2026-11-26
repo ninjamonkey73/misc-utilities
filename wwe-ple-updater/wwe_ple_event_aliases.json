@@ -1,6 +1,7 @@
 {
   "aliases": {
     "money-in-the-bank": "mitb",
+    "money-in-the-bank-tickets": "mitb",
     "mitb": "mitb",
     "crown-jewel": "crownjewel",
     "crownjewel": "crownjewel",
@@ -21,6 +22,7 @@
     "wwe-smackdown",
     "friday-night-smackdown",
     "nxt",
-    "wwe-nxt"
+    "wwe-nxt",
+    "road-to"
   ]
 }
